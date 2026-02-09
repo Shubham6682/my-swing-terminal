@@ -33,23 +33,22 @@ def get_market_status():
 def analyze_stock(ticker):
     try:
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
-        if df.empty: return None
+        if df.empty or len(df) < 200: return None
         
         # Calculate Indicators
         df['200_DMA'] = df['Close'].rolling(window=200).mean()
         df['RSI'] = calculate_rsi(df)
         
-        cmp = round(df['Close'].iloc[-1], 2)
-        dma_200 = round(df['200_DMA'].iloc[-1], 2)
-        rsi = round(df['RSI'].iloc[-1], 2)
+        cmp = float(df['Close'].iloc[-1])
+        dma_200 = float(df['200_DMA'].iloc[-1])
+        rsi = float(df['RSI'].iloc[-1])
         
         # Logic: Swing Parameters
         is_healthy = cmp > dma_200
         rsi_status = "HOT" if rsi > 70 else ("COLD" if rsi < 40 else "SAFE")
         
-        # Risk/Reward Calculation (Hypothetical Entry at CMP)
-        # We use the recent 20-day low as a dynamic Stop Loss
-        stop_loss = round(df['Close'].tail(20).min() * 0.98, 2)
+        # Risk/Reward Calculation
+        stop_loss = round(float(df['Close'].tail(20).min()) * 0.98, 2)
         risk = cmp - stop_loss
         target = round(cmp + (risk * 2), 2)
         
@@ -57,16 +56,16 @@ def analyze_stock(ticker):
 
         return {
             "Ticker": ticker.replace(".NS", ""),
-            "Price": cmp,
-            "200 DMA": dma_200,
+            "Price": round(cmp, 2),
+            "200 DMA": round(dma_200, 2),
             "Trend": "Bullish" if is_healthy else "Sick",
-            "RSI": rsi,
+            "RSI": round(rsi, 2),
             "RSI Status": rsi_status,
             "Stop Loss": stop_loss,
             "Target (1:2)": target,
             "Action": buy_zone
         }
-    except Exception as e:
+    except Exception:
         return None
 
 # --- UI LAYOUT ---
@@ -79,13 +78,22 @@ with st.spinner('Fetching live NSE data...'):
         data = analyze_stock(stock)
         if data: results.append(data)
 
-df_display = pd.DataFrame(results)
+if results:
+    df_display = pd.DataFrame(results)
+    
+    # Updated highlighting logic to prevent KeyError
+    def highlight_buy(val):
+        if val == 'YES':
+            return 'background-color: #2ecc71; color: white; font-weight: bold'
+        return 'background-color: #e74c3c; color: white; font-weight: bold'
 
-# Formatting for the table
-def highlight_buy(val):
-    color = '#2ecc71' if val == 'YES' else '#e74c3c'
-    return f'background-color: {color}; color: white; font-weight: bold'
-
-st.table(df_display.style.applymap(highlight_buy, subset=['Action']))
+    # Display using st.dataframe for better compatibility
+    st.dataframe(
+        df_display.style.map(highlight_buy, subset=['Action']),
+        use_container_width=True,
+        hide_index=True
+    )
+else:
+    st.error("⚠️ No data could be fetched. Please check your internet or wait for market hours.")
 
 st.info("💡 **Entry Rule:** Only enter if 'Action' is YES and a 15-minute candle closes above the Entry Price.")
