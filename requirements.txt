@@ -2,3 +2,5 @@ streamlit
 yfinance
 pandas
 streamlit-autorefresh
+matplotlib
+jinja2
