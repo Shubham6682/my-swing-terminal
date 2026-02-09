@@ -98,3 +98,6 @@ else:
     st.error("Data synchronization failed. Please wait for the next 15-min window.")
 
 st.info("💡 **Precision Tip:** Wait for the 15-minute candle to close above the current price before entering.")
+
+
+
