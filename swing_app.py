@@ -2,117 +2,103 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import datetime
+from concurrent.futures import ThreadPoolExecutor
 from streamlit_autorefresh import st_autorefresh
 
-# --- CONFIGURATION ---
-ST_CAPITAL = 100000  # Default Capital
-ST_RISK_PCT = 1      # 1% Risk per trade
+# --- CONFIG ---
+st.set_page_config(page_title="Flash Swing Scanner", layout="wide")
+st_autorefresh(interval=300000, key="datarefresh") # 5 min refresh
 
-# Set page config
-st.set_page_config(page_title="Nifty 50 Swing Scanner", layout="wide")
-st_autorefresh(interval=300000, key="datarefresh")
-
-# --- DATA FETCHING ---
+# --- DATA FETCHING (CACHED) ---
 @st.cache_data(ttl=3600)
-def get_nifty50_symbols():
+def get_nifty50_list():
+    """Fetches the Nifty 50 ticker list from NSE."""
     try:
-        url = 'https://nsearchives.nseindia.com/content/indices/ind_nifty50list.csv'
+        url = 'https://archives.nseindia.com/content/indices/ind_nifty50list.csv'
         df = pd.read_csv(url)
         return [s + ".NS" for s in df['Symbol'].tolist()]
     except:
-        # Fallback list if NSE link is down
-        return ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'INFY.NS', 'SBIN.NS', 'BHARTIARTL.NS', 'HINDALCO.NS']
+        return ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'INFY.NS', 'SBIN.NS']
 
-def calculate_rsi(data, window=14):
-    delta = data['Close'].diff()
+def calculate_rsi(prices, window=14):
+    delta = prices.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-def analyze_stock(ticker, capital, risk_pct):
+# --- THE ENGINE (PARALLEL PROCESSING) ---
+def process_ticker(ticker, capital, risk_pct):
     try:
+        # We only need 1y data for 200 DMA
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
-        if df.empty or len(df) < 200: return None
-        
-        df['200_DMA'] = df['Close'].rolling(window=200).mean()
-        df['RSI'] = calculate_rsi(df)
+        if len(df) < 200: return None
         
         cmp = float(df['Close'].iloc[-1])
-        dma_200 = float(df['200_DMA'].iloc[-1])
-        rsi = float(df['RSI'].iloc[-1])
+        dma_200 = float(df['Close'].rolling(window=200).mean().iloc[-1])
+        rsi = float(calculate_rsi(df['Close']).iloc[-1])
         
-        # --- SWING LOGIC ---
-        is_bullish = cmp > dma_200
-        rsi_status = "HOT" if rsi > 70 else ("COLD" if rsi < 40 else "SAFE")
-        
-        # --- RISK CALCULATOR ---
-        # Stop Loss at recent 20-day low (Safety Floor)
-        stop_loss = round(float(df['Close'].tail(20).min()) * 0.98, 2)
+        # Risk Logic
+        stop_loss = round(float(df['Low'].tail(20).min()) * 0.98, 2)
         risk_per_share = cmp - stop_loss
         
-        if risk_per_share <= 0: return None # Protection against math errors
+        if risk_per_share <= 0: return None
         
-        # How much money can we lose? (1% of 1,00,000 = 1,000)
-        total_risk_allowed = capital * (risk_pct / 100)
-        qty = int(total_risk_allowed // risk_per_share)
-        
+        # Calculator
+        risk_amount = capital * (risk_pct / 100)
+        qty = int(risk_amount // risk_per_share)
         target = round(cmp + (risk_per_share * 2), 2)
         
-        action = "✅ BUY ZONE" if (is_bullish and rsi_status == "SAFE") else "⏳ WAIT"
-
+        # Action Logic
+        is_bullish = cmp > dma_200
+        action = "✅ BUY ZONE" if (is_bullish and 40 < rsi < 65) else "⏳ WAIT"
+        
         return {
             "Stock": ticker.replace(".NS", ""),
-            "CMP": round(cmp, 2),
+            "Price": round(cmp, 2),
             "200 DMA": round(dma_200, 2),
-            "RSI": round(rsi, 2),
-            "Status": rsi_status,
+            "RSI": round(rsi, 1),
             "Stop Loss": stop_loss,
-            "Target (1:2)": target,
-            "Shares to Buy": qty,
+            "Target": target,
+            "Qty": qty,
             "Action": action
         }
     except:
         return None
 
-# --- UI INTERFACE ---
-st.sidebar.title("💰 Risk Manager")
-user_capital = st.sidebar.number_input("Your Total Trading Capital (₹)", value=100000, step=5000)
-user_risk = st.sidebar.slider("Risk Per Trade (%)", 0.5, 3.0, 1.0, 0.5)
+# --- UI ---
+st.title("⚡ Flash Swing Terminal (Nifty 50)")
+st.sidebar.header("⚙️ Strategy Settings")
+cap = st.sidebar.number_input("Capital (₹)", 100000)
+risk = st.sidebar.slider("Risk per trade (%)", 0.5, 2.0, 1.0)
 
-st.title("🏹 Nifty 50 Dynamic Swing Scanner")
-st.write(f"Scanning Nifty 50 stocks for **Price > 200 DMA** and **RSI < 70**.")
-
-if st.button("Manual Scan Now"):
+if st.sidebar.button("Force Refresh Data"):
     st.cache_data.clear()
 
-with st.spinner('Analyzing 50 stocks...'):
-    symbols = get_nifty50_symbols()
-    results = []
-    # Using a progress bar for UX
-    progress_bar = st.progress(0)
-    for i, symbol in enumerate(symbols):
-        res = analyze_stock(symbol, user_capital, user_risk)
-        if res: results.append(res)
-        progress_bar.progress((i + 1) / len(symbols))
-
-if results:
-    final_df = pd.DataFrame(results)
+with st.spinner(f"Scanning Nifty 50 in parallel..."):
+    tickers = get_nifty50_list()
     
-    # Custom Styling
-    def style_action(val):
-        color = '#27ae60' if "BUY" in val else '#95a5a6'
-        return f'background-color: {color}; color: white; font-weight: bold'
+    # This is the speed booster: ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = list(executor.map(lambda x: process_ticker(x, cap, risk), tickers))
 
-    # Filtered View (Show only Buy Zone by default)
-    show_all = st.checkbox("Show all Nifty 50 stocks (including WAIT)")
-    if not show_all:
-        final_df = final_df[final_df['Action'] == "✅ BUY ZONE"]
+# Filter out None results
+final_data = [r for r in results if r is not None]
+
+if final_data:
+    df = pd.DataFrame(final_data)
+    
+    # Show only Buy Zone by default for clarity
+    only_buy = st.checkbox("Show only Buy Zone stocks", value=True)
+    if only_buy:
+        df = df[df['Action'] == "✅ BUY ZONE"]
 
     st.dataframe(
-        final_df.style.map(style_action, subset=['Action']),
+        df.style.background_gradient(subset=['RSI'], cmap='RdYlGn_r'),
         use_container_width=True,
         hide_index=True
     )
 else:
-    st.warning("No high-conviction trades found right now. Check back in 5 mins.")
+    st.error("Market data fetch failed. Check your internet or wait for market open.")
+
+st.caption(f"Last scanned at: {datetime.datetime.now().strftime('%H:%M:%S')}")
