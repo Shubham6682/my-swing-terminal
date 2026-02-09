@@ -5,8 +5,8 @@ import datetime
 from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="Persistent Swing Terminal", layout="wide")
-st_autorefresh(interval=900000, key="datarefresh") # 15 Minute Window
+st.set_page_config(page_title="Institutional Swing Terminal", layout="wide")
+st_autorefresh(interval=900000, key="datarefresh") # 15-min sync
 
 # --- DATA FETCHING ---
 @st.cache_data(ttl=3600)
@@ -14,9 +14,11 @@ def get_nifty50_list():
     try:
         url = 'https://archives.nseindia.com/content/indices/ind_nifty50list.csv'
         df = pd.read_csv(url)
-        return [s + ".NS" for s in df['Symbol'].tolist()]
+        # Create a dictionary of Symbol: Sector
+        sector_map = dict(zip(df['Symbol'] + ".NS", df['Sector']))
+        return sector_map
     except:
-        return ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'SBIN.NS']
+        return {'RELIANCE.NS': 'ENERGY', 'TCS.NS': 'IT', 'SBIN.NS': 'BANKING'}
 
 def calculate_rsi(prices, window=14):
     delta = prices.diff()
@@ -25,21 +27,36 @@ def calculate_rsi(prices, window=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-def analyze_stock(ticker, capital, risk_pct):
+# --- UI INTERFACE ---
+st.title("🏹 Institutional Swing Terminal")
+
+st.sidebar.header("🛡️ Strategy Settings")
+cap = st.sidebar.number_input("Total Capital (₹)", 100000, step=10000)
+risk_p = st.sidebar.slider("Risk per trade (%)", 0.5, 2.0, 1.0, 0.5)
+
+# Status Indicator
+now = datetime.datetime.now()
+st.subheader(f"Data Status: {'🟢 LIVE' if (9 <= now.hour < 16 and now.weekday() < 5) else '⚪ MARKET CLOSED (Last Data)'}")
+
+with st.spinner("Downloading Nifty 50 Data in Bulk..."):
+    sector_dict = get_nifty50_list()
+    tickers = list(sector_dict.keys())
+    
+    # BULK DOWNLOAD (The Fix)
+    # We download 1 year of daily data for all 50 stocks at once
+    data = yf.download(tickers, period="1y", interval="1d", group_by='ticker', progress=False)
+
+results = []
+for t in tickers:
     try:
-        # We fetch "1mo" to ensure we have enough data even if the market just opened/closed
-        df = yf.download(ticker, period="1y", interval="1d", progress=False)
+        df = data[t].dropna()
+        if len(df) < 200: continue
         
-        # If the dataframe is empty, we return None to avoid the 'Closed' error
-        if df.empty or len(df) < 200:
-            return None
-        
-        # We use .iloc[-1] to always get the LATEST available candle (even if from yesterday)
         cmp = float(df['Close'].iloc[-1])
         dma_200 = float(df['Close'].rolling(window=200).mean().iloc[-1])
         rsi = float(calculate_rsi(df['Close']).iloc[-1])
         
-        # FII Sentiment Proxy (Volume + Price Action)
+        # FII Sentiment Proxy
         vol_avg = df['Volume'].tail(20).mean()
         curr_vol = df['Volume'].iloc[-1]
         fii_status = "🟢 Accumulating" if (curr_vol > vol_avg and df['Close'].iloc[-1] > df['Open'].iloc[-1]) else "⚪ Neutral"
@@ -47,66 +64,41 @@ def analyze_stock(ticker, capital, risk_pct):
         # Risk Math
         stop_loss = round(float(df['Low'].tail(20).min()) * 0.98, 2)
         risk_per_share = cmp - stop_loss
-        if risk_per_share <= 0: return None
         
-        qty = int((capital * (risk_pct / 100)) // risk_per_share)
-        reward_per_share = risk_per_share * 2
-        potential_profit = round(qty * reward_per_share, 2)
-        
-        action = "✅ BUY" if (cmp > dma_200 and 40 < rsi < 65) else "⏳ WAIT"
-        
-        return {
-            "Stock": ticker.replace(".NS", ""),
-            "Price": round(cmp, 2),
-            "RSI": round(rsi, 1),
-            "FII Sentiment": fii_status,
-            "Qty": qty,
-            "Target": round(cmp + reward_per_share, 2),
-            "Profit Goal": potential_profit,
-            "Action": action
-        }
-    except Exception as e:
-        return None
-
-# --- UI INTERFACE ---
-st.title("🏹 Institutional Swing Terminal")
-
-# Sidebar
-st.sidebar.header("🛡️ Strategy Settings")
-cap = st.sidebar.number_input("Total Capital (₹)", 100000, step=10000)
-risk_p = st.sidebar.slider("Risk per trade (%)", 0.5, 2.0, 1.0, 0.5)
-
-# Scanner Logic
-tickers = get_nifty50_list()
-results = []
-
-# Status Indicator
-now = datetime.datetime.now()
-market_status = "🟢 LIVE" if (9 <= now.hour < 16 and now.weekday() < 5) else "⚪ CLOSED (Showing Last Data)"
-st.subheader(f"Market Status: {market_status}")
-
-with st.spinner("Fetching latest available stock data..."):
-    for t in tickers:
-        res = analyze_stock(t, cap, risk_p)
-        if res: results.append(res)
+        if risk_per_share > 0:
+            qty = int((cap * (risk_p / 100)) // risk_per_share)
+            profit_goal = round(qty * (risk_per_share * 2), 2)
+            
+            action = "✅ BUY" if (cmp > dma_200 and 40 < rsi < 65) else "⏳ WAIT"
+            
+            results.append({
+                "Stock": t.replace(".NS", ""),
+                "Sector": sector_dict.get(t, "N/A"),
+                "Price": round(cmp, 2),
+                "RSI": round(rsi, 1),
+                "FII Sentiment": fii_status,
+                "Qty": qty,
+                "Stop Loss": stop_loss,
+                "Action": action,
+                "Profit Goal": profit_goal
+            })
+    except:
+        continue
 
 if results:
-    df = pd.DataFrame(results)
-    buy_only_df = df[df['Action'] == "✅ BUY"]
+    full_df = pd.DataFrame(results)
+    buy_df = full_df[full_df['Action'] == "✅ BUY"]
     
     # Sidebar Metric
-    total_potential = buy_only_df['Profit Goal'].sum()
     st.sidebar.markdown("---")
-    st.sidebar.metric("💰 Total Profit Potential", f"₹{total_potential:,.2f}")
-    st.sidebar.caption("Sum of target profits for all active BUY signals.")
-
-    # Main Table
-    show_all = st.checkbox("Show all Nifty 50 stocks (Uncheck for BUY signals only)", value=False)
-    display_df = df if show_all else buy_only_df
+    st.sidebar.metric("💰 Total Profit Potential", f"₹{buy_df['Profit Goal'].sum():,.2f}")
     
-    # Standard table for stability
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    # Main View
+    show_all = st.checkbox("Show all Nifty 50 stocks", value=False)
+    display_df = full_df if show_all else buy_df
+    
+    st.dataframe(display_df.drop(columns=['Profit Goal']), use_container_width=True, hide_index=True)
 else:
-    st.warning("No data available at the moment. Please refresh in a few minutes.")
+    st.warning("⚠️ Data sync in progress. If this persists, the NSE server might be busy. Refreshing in 15 mins...")
 
-st.info(f"💡 Auto-refreshes every 15 mins. Last Update: {now.strftime('%H:%M:%S')}")
+st.info(f"💡 Last Sync: {now.strftime('%H:%M:%S')}")
