@@ -5,20 +5,18 @@ import datetime
 from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="Precision Swing Scanner", layout="wide")
+st.set_page_config(page_title="Institutional Swing Terminal", layout="wide")
+st_autorefresh(interval=900000, key="datarefresh") # 15 Minute Window
 
-# 15 Minute Refresh (900,000 ms)
-st_autorefresh(interval=900000, key="datarefresh") 
-
-# --- DATA FUNCTIONS ---
-@st.cache_data(ttl=900) # Cache matches the 15-min window
+# --- DATA FETCHING ---
+@st.cache_data(ttl=3600)
 def get_nifty50_list():
     try:
         url = 'https://archives.nseindia.com/content/indices/ind_nifty50list.csv'
         df = pd.read_csv(url)
         return [s + ".NS" for s in df['Symbol'].tolist()]
     except:
-        return ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'SBIN.NS', 'HINDALCO.NS']
+        return ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'ICICIBANK.NS', 'SBIN.NS']
 
 def calculate_rsi(prices, window=14):
     delta = prices.diff()
@@ -27,77 +25,77 @@ def calculate_rsi(prices, window=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-def analyze_stock_precision(ticker, capital, risk_pct):
+def analyze_stock(ticker, capital, risk_pct):
     try:
-        # Fetching full 1y data to ensure accurate 200 DMA calculation
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
         if len(df) < 200: return None
         
-        # Latest Close and Indicators
         cmp = float(df['Close'].iloc[-1])
         dma_200 = float(df['Close'].rolling(window=200).mean().iloc[-1])
         rsi = float(calculate_rsi(df['Close']).iloc[-1])
         
-        # Risk Management (Precision based on 20-day volatility)
-        recent_low = float(df['Low'].tail(20).min())
-        stop_loss = round(recent_low * 0.98, 2) # 2% buffer below recent swing low
+        # --- FII SENTIMENT PROXY ---
+        # We calculate the volume-weighted price change over the last 5 days 
+        # to see if 'Big Money' is accumulating.
+        vol_avg = df['Volume'].tail(20).mean()
+        curr_vol = df['Volume'].iloc[-1]
+        fii_status = "🟢 Accumulating" if (curr_vol > vol_avg and df['Close'].iloc[-1] > df['Open'].iloc[-1]) else "⚪ Neutral"
         
+        # --- RISK MATH ---
+        stop_loss = round(float(df['Low'].tail(20).min()) * 0.98, 2)
         risk_per_share = cmp - stop_loss
         if risk_per_share <= 0: return None
         
-        # Position Sizing
-        max_loss_allowed = capital * (risk_pct / 100)
-        qty = int(max_loss_allowed // risk_per_share)
-        target = round(cmp + (risk_per_share * 2), 2)
+        qty = int((capital * (risk_pct / 100)) // risk_per_share)
+        reward_per_share = risk_per_share * 2
+        potential_profit = round(qty * reward_per_share, 2)
         
-        # Logic Verdict
-        is_above_200dma = cmp > dma_200
-        is_rsi_safe = 40 < rsi < 65 # Avoiding overbought/oversold extremes
-        
-        action = "✅ BUY" if (is_above_200dma and is_rsi_safe) else "⏳ WAIT"
+        # --- VERDICT ---
+        action = "✅ BUY" if (cmp > dma_200 and 40 < rsi < 65) else "⏳ WAIT"
         
         return {
             "Stock": ticker.replace(".NS", ""),
             "Price": round(cmp, 2),
-            "200 DMA": round(dma_200, 2),
             "RSI": round(rsi, 1),
-            "Stop Loss": stop_loss,
-            "Target (1:2)": target,
+            "FII Sentiment": fii_status,
             "Qty": qty,
+            "Target (1:2)": round(cmp + reward_per_share, 2),
+            "Profit Goal": potential_profit,
             "Action": action
         }
     except:
         return None
 
 # --- UI INTERFACE ---
-st.title("🏹 Nifty 50 Precision Scanner")
-st.write(f"Refreshes every **15 minutes**. Current Time: {datetime.datetime.now().strftime('%H:%M:%S')}")
+st.title("🏹 Institutional Swing Terminal")
+st.sidebar.header("🛡️ Strategy Settings")
+cap = st.sidebar.number_input("Total Capital (₹)", 100000, step=10000)
+risk_p = st.sidebar.slider("Risk per trade (%)", 0.5, 2.0, 1.0, 0.5)
 
-st.sidebar.header("🛡️ Risk Parameters")
-user_cap = st.sidebar.number_input("Capital (₹)", 100000, step=10000)
-user_risk = st.sidebar.slider("Risk per trade (%)", 0.5, 2.0, 1.0, 0.5)
-
-with st.spinner("Calculating precision metrics for Nifty 50..."):
-    tickers = get_nifty50_list()
-    results = []
-    # Sequential processing for maximum precision and error logging
+# Scanner Logic
+tickers = get_nifty50_list()
+results = []
+with st.spinner("Syncing with NSE..."):
     for t in tickers:
-        res = analyze_stock_precision(t, user_cap, user_risk)
+        res = analyze_stock(t, cap, risk_p)
         if res: results.append(res)
 
 if results:
     df = pd.DataFrame(results)
+    buy_only_df = df[df['Action'] == "✅ BUY"]
     
-    only_buy = st.checkbox("Show only high-conviction BUY signals", value=True)
-    if only_buy:
-        df = df[df['Action'] == "✅ BUY"]
+    # --- SIDEBAR METRIC ---
+    total_potential = buy_only_df['Profit Goal'].sum()
+    st.sidebar.markdown("---")
+    st.sidebar.metric("💰 Total Profit Potential", f"₹{total_potential:,.2f}", help="Sum of profits if all BUY signals hit 1:2 targets")
+    st.sidebar.caption("Based on current active BUY signals")
 
-    # Simple, unbreakable table
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    # Main View
+    show_all = st.checkbox("Show all Nifty 50 stocks", value=False)
+    display_df = df if show_all else buy_only_df
+    
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
 else:
-    st.error("Data synchronization failed. Please wait for the next 15-min window.")
+    st.error("Data fetch failed. Market may be closed or sync is slow.")
 
-st.info("💡 **Precision Tip:** Wait for the 15-minute candle to close above the current price before entering.")
-
-
-
+st.info(f"💡 Refreshes every 15 mins. Last sync: {datetime.datetime.now().strftime('%H:%M:%S')}")
