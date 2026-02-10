@@ -7,7 +7,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIG ---
 st.set_page_config(page_title="Nifty 50 Profit Terminal", layout="wide")
-st_autorefresh(interval=60000, key="datarefresh") # 1-min Sync for real-time feel
+st_autorefresh(interval=60000, key="datarefresh") # 1-min Real-Time Sync
 
 # --- TICKERS ---
 NIFTY_50 = [
@@ -43,7 +43,7 @@ ist = pytz.timezone('Asia/Kolkata')
 now_ist = datetime.datetime.now(ist)
 st.markdown(f"**Live Sync:** `{now_ist.strftime('%H:%M:%S')}` IST")
 
-with st.spinner("Calculating potential profits..."):
+with st.spinner("Calculating real-time profits..."):
     # Bulk fetching
     hist_data = yf.download(NIFTY_50, period="2y", interval="1d", group_by='ticker', progress=False)
     live_data = yf.download(NIFTY_50, period="1d", interval="1m", group_by='ticker', progress=False)
@@ -52,14 +52,8 @@ results = []
 total_profit_pool = 0.0
 
 for t in NIFTY_50:
-    row = {"Stock": t.replace(".NS", ""), "Price": 0.0, "Action": "⏳ WAIT", "Qty": 0, "Profit Potential": 0.0}
+    # Default state for every stock
+    row = {"Stock": t.replace(".NS", ""), "Price": 0.0, "Action": "⏳ WAIT", "Qty": 0, "Profit Potential": 0.0, "RSI": 0.0}
+    
     try:
-        df_h = hist_data[t].dropna()
-        df_l = live_data[t].dropna()
-        
-        if not df_h.empty and not df_l.empty:
-            price = float(df_l['Close'].iloc[-1])
-            dma_200 = float(df_h['Close'].rolling(window=200).mean().iloc[-1])
-            rsi = float(calculate_rsi(df_h['Close']).iloc[-1])
-            
-            # Risk Logic
+        if t in hist_data.columns.levels[0] and t in live_data.columns.levels[0]:
