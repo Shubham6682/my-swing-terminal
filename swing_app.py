@@ -7,9 +7,9 @@ from streamlit_autorefresh import st_autorefresh
 
 # --- CONFIG ---
 st.set_page_config(page_title="Nifty 50 Profit Terminal", layout="wide")
-st_autorefresh(interval=60000, key="datarefresh") # 1-min Real-Time Sync
+st_autorefresh(interval=60000, key="datarefresh") # 1-min Sync
 
-# --- TICKERS ---
+# --- MASTER TICKER LIST ---
 NIFTY_50 = [
     "ADANIENT.NS", "ADANIPORTS.NS", "APOLLOHOSP.NS", "ASIANPAINT.NS", "AXISBANK.NS",
     "BAJAJ-AUTO.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "BEL.NS", "BPCL.NS",
@@ -33,6 +33,36 @@ def calculate_rsi(prices, window=14):
 # --- UI ---
 st.title("🏹 Nifty 50 Precision Profit Terminal")
 
-# Sidebar - User Inputs
+# Sidebar - Settings
 st.sidebar.header("🛡️ Risk & Capital")
-cap = st.sidebar.number_input("Total Capital (₹)", value
+# Fixed the Syntax Error here
+cap = st.sidebar.number_input("Total Capital (₹)", value=50000, step=5000)
+risk_p = st.sidebar.slider("Risk per Trade (%)", 0.5, 5.0, 1.0, 0.5)
+
+# Clock Logic
+ist = pytz.timezone('Asia/Kolkata')
+now_ist = datetime.datetime.now(ist)
+st.markdown(f"**Live Sync:** `{now_ist.strftime('%H:%M:%S')}` IST")
+
+with st.spinner("Downloading real-time market data..."):
+    # Dual-Sync: 2y for Trend, 1d for Price
+    hist_data = yf.download(NIFTY_50, period="2y", interval="1d", group_by='ticker', progress=False)
+    live_data = yf.download(NIFTY_50, period="1d", interval="1m", group_by='ticker', progress=False)
+
+results = []
+total_profit_pool = 0.0
+
+for t in NIFTY_50:
+    row = {"Stock": t.replace(".NS", ""), "Price": 0.0, "Action": "⏳ WAIT", "Qty": 0, "Profit Potential": 0.0, "RSI": 0.0}
+    try:
+        if t in hist_data.columns.levels[0] and t in live_data.columns.levels[0]:
+            df_h = hist_data[t].dropna()
+            df_l = live_data[t].dropna()
+            
+            if not df_h.empty and not df_l.empty:
+                price = float(df_l['Close'].iloc[-1])
+                dma_200 = float(df_h['Close'].rolling(window=200).mean().iloc[-1])
+                rsi_val = float(calculate_rsi(df_h['Close']).iloc[-1])
+                
+                # Risk: 20-day low + buffer
+                stop_loss = float(df_h['Low'].tail(
