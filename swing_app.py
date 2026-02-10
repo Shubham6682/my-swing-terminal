@@ -35,7 +35,6 @@ st.title("🏹 Nifty 50 Precision Profit Terminal")
 
 # Sidebar - Settings
 st.sidebar.header("🛡️ Risk & Capital")
-# Fixed the Syntax Error here
 cap = st.sidebar.number_input("Total Capital (₹)", value=50000, step=5000)
 risk_p = st.sidebar.slider("Risk per Trade (%)", 0.5, 5.0, 1.0, 0.5)
 
@@ -53,8 +52,11 @@ results = []
 total_profit_pool = 0.0
 
 for t in NIFTY_50:
+    # Initialize basic row
     row = {"Stock": t.replace(".NS", ""), "Price": 0.0, "Action": "⏳ WAIT", "Qty": 0, "Profit Potential": 0.0, "RSI": 0.0}
+    
     try:
+        # Check if ticker exists in both downloaded sets
         if t in hist_data.columns.levels[0] and t in live_data.columns.levels[0]:
             df_h = hist_data[t].dropna()
             df_l = live_data[t].dropna()
@@ -64,5 +66,67 @@ for t in NIFTY_50:
                 dma_200 = float(df_h['Close'].rolling(window=200).mean().iloc[-1])
                 rsi_val = float(calculate_rsi(df_h['Close']).iloc[-1])
                 
-                # Risk: 20-day low + buffer
-                stop_loss = float(df_h['Low'].tail(
+                # Risk Logic: Using 20-day low with 1.5% buffer
+                recent_low = float(df_h['Low'].tail(20).min())
+                stop_loss = recent_low * 0.985
+                risk_per_share = price - stop_loss
+                
+                # FII Volume Accumulation Check
+                vol_avg = df_h['Volume'].tail(20).mean()
+                curr_vol = df_l['Volume'].sum()
+                fii = "🟢 Accumulating" if (curr_vol > vol_avg and price > df_l['Open'].iloc[0]) else "⚪ Neutral"
+                
+                # Strategy: Trend > 200 DMA and RSI between 40-65
+                is_valid = (price > dma_200 and 40 < rsi_val < 65)
+                
+                if is_valid and risk_per_share > 0:
+                    qty = int((cap * (risk_p / 100)) // risk_per_share)
+                    reward = risk_per_share * 2
+                    profit = round(qty * reward, 2)
+                    
+                    total_profit_pool += profit
+                    row.update({
+                        "Price": round(price, 2),
+                        "Action": "✅ BUY",
+                        "Qty": qty,
+                        "Target": round(price + reward, 2),
+                        "Profit Potential": profit,
+                        "RSI": round(rsi_val, 1),
+                        "FII": fii
+                    })
+                else:
+                    row.update({
+                        "Price": round(price, 2),
+                        "Action": "⏳ WAIT",
+                        "RSI": round(rsi_val, 1),
+                        "FII": fii
+                    })
+    except Exception:
+        pass
+    results.append(row)
+
+# --- DISPLAY ENGINE ---
+if results:
+    # Sidebar Metrics
+    st.sidebar.markdown("---")
+    st.sidebar.metric("💰 Total Potential Profit", f"₹{total_profit_pool:,.2f}")
+    st.sidebar.write(f"Risking **₹{cap * (risk_p/100):.2f}** per trade")
+
+    df = pd.DataFrame(results)
+    
+    # Sorting: Push Green setups to the top
+    df['Sort'] = df['Action'].apply(lambda x: 0 if x == "✅ BUY" else 1)
+    df = df.sort_values('Sort').drop('Sort', axis=1)
+
+    # Styling for Visual Impact
+    def style_rows(row):
+        color = '#27ae60' if row['Action'] == "✅ BUY" else '#ff4d4d'
+        return [f'background-color: {color}; color: white'] * len(row)
+
+    st.dataframe(
+        df.style.apply(style_rows, axis=1), 
+        use_container_width=True, 
+        hide_index=True
+    )
+else:
+    st.error("Data refresh failed. Check server logs.")
