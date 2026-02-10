@@ -8,6 +8,23 @@ from streamlit_autorefresh import st_autorefresh
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="Nifty 50 Terminal", layout="wide")
 
+# This is the ONLY safe way to lock a header in Streamlit without white-outs
+st.markdown("""
+    <style>
+    [data-testid="stHeader"] {
+        background-color: rgba(255, 255, 255, 0.9);
+    }
+    div[data-testid="stVerticalBlock"] > div:first-child {
+        position: sticky;
+        top: 0;
+        z-index: 999;
+        background-color: white;
+        padding: 10px;
+        border-bottom: 2px solid #f0f2f6;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
@@ -16,47 +33,10 @@ is_open = (now.weekday() < 5) and (9 <= now.hour < 16)
 if (now.hour == 9 and now.minute < 15) or (now.hour == 15 and now.minute > 30):
     is_open = False
 
-# Silent background refresh: 10s for indices/stocks balance
+# Background refresh: 10s for stability
 st_autorefresh(interval=10000 if is_open else 60000, key="silent_sync")
 
-# --- 2. PERMANENT SIDEBAR INDICES (STICKY) ---
-with st.sidebar:
-    st.header("🌍 Market Indices")
-    indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
-    
-    for name, ticker in indices.items():
-        try:
-            t_obj = yf.Ticker(ticker)
-            # Fetch minimal data for maximum speed
-            df_live = t_obj.history(period="1d", interval="1m")
-            df_hist = t_obj.history(period="2d")
-            
-            if not df_live.empty and not df_hist.empty:
-                curr = df_live['Close'].iloc[-1]
-                prev = df_hist['Close'].iloc[0]
-                change = curr - prev
-                pct = (change / prev) * 100
-                st.metric(name, f"{curr:,.2f}", f"{change:+.2f} ({pct:+.2f}%)")
-            else:
-                st.metric(name, "N/A")
-        except:
-            st.metric(name, "Offline")
-    
-    st.divider()
-    status_txt = "🟢 MARKET OPEN" if is_open else "⚪ MARKET CLOSED"
-    st.write(f"**{status_txt}**")
-    st.write(f"IST: {now.strftime('%H:%M:%S')}")
-    st.divider()
-    
-    # Trade Settings moved below indices
-    st.header("🛡️ Trade Settings")
-    cap = st.number_input("Capital (₹)", value=50000)
-    risk_p = st.slider("Risk (%)", 0.5, 5.0, 1.0)
-
-# --- 3. MAIN TERMINAL UI ---
-st.title("🏹 Nifty 50 Precision Terminal")
-
-# --- 4. DATA SCANNER ---
+# --- 2. THE TICKERS ---
 NIFTY_50 = [
     "ADANIENT.NS", "ADANIPORTS.NS", "APOLLOHOSP.NS", "ASIANPAINT.NS", "AXISBANK.NS",
     "BAJAJ-AUTO.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "BEL.NS", "BPCL.NS",
@@ -70,15 +50,51 @@ NIFTY_50 = [
     "TATASTEEL.NS", "TECHM.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS"
 ]
 
+# --- 3. THE FIXED HEADER PANEL ---
+header_box = st.container()
+with header_box:
+    indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
+    idx_cols = st.columns(len(indices) + 1)
+    
+    for i, (name, ticker) in enumerate(indices.items()):
+        try:
+            # Independent fetch for Sensex stability
+            t_obj = yf.Ticker(ticker)
+            df_live = t_obj.history(period="1d", interval="1m")
+            df_hist = t_obj.history(period="2d")
+            
+            if not df_live.empty and not df_hist.empty:
+                curr = df_live['Close'].iloc[-1]
+                prev_close = df_hist['Close'].iloc[0]
+                change = curr - prev_close
+                pct = (change / prev_close) * 100
+                idx_cols[i].metric(name, f"{curr:,.2f}", f"{change:+.2f} ({pct:+.2f}%)")
+            else:
+                idx_cols[i].metric(name, "N/A")
+        except:
+            idx_cols[i].metric(name, "N/A")
+
+    status_icon = "🟢 OPEN" if is_open else "⚪ CLOSED"
+    idx_cols[-1].write(f"**{status_icon}**")
+    idx_cols[-1].write(f"IST: {now.strftime('%H:%M:%S')}")
+
+st.divider()
+
+# --- 4. SIDEBAR SETTINGS ---
+st.sidebar.header("🛡️ Trade Settings")
+cap = st.sidebar.number_input("Capital (₹)", value=50000)
+risk_p = st.sidebar.slider("Risk (%)", 0.5, 5.0, 1.0)
+
+# --- 5. THE STOCK SCANNER ---
 @st.cache_data(ttl=30)
-def get_market_data():
+def fetch_stocks():
     h = yf.download(NIFTY_50, period="2y", interval="1d", progress=False)
     l = yf.download(NIFTY_50, period="1d", interval="1m", progress=False)
     return h, l
 
 try:
-    with st.spinner("Analyzing Signals..."):
-        h_data, l_data = get_market_data()
+    with st.spinner("Analyzing Market..."):
+        h_data, l_data = fetch_stocks()
 
     results = []
     total_prof = 0.0
@@ -88,7 +104,6 @@ try:
             hc, lc = h_data['Close'][t].dropna(), l_data['Close'][t].dropna()
             price = float(lc.iloc[-1]) if not lc.empty else float(hc.iloc[-1])
             
-            # Technicals
             dma200 = float(hc.rolling(200).mean().iloc[-1])
             delta = hc.diff()
             gain = delta.where(delta > 0, 0).rolling(14).mean()
@@ -118,12 +133,13 @@ try:
 
     if results:
         df = pd.DataFrame(results)
-        # Sorting: Green signals up
+        # Sort logic: Green on top
         df['s'] = df['Action'].apply(lambda x: 0 if x == "✅ BUY" else 1)
         df = df.sort_values('s').drop(columns=['s'])
         
-        st.sidebar.metric("💰 Total Potential Profit", f"₹{total_prof:,.2f}")
+        st.sidebar.divider()
+        st.sidebar.metric("💰 Potential Profit", f"₹{total_prof:,.2f}")
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-except Exception as e:
-    st.info("Market stream syncing...")
+except Exception:
+    st.info("Market data refreshing...")
