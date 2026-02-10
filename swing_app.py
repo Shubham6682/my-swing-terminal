@@ -30,14 +30,4 @@ is_open = (9 <= now.hour < 16) and (now.weekday() < 5)
 if (now.hour == 9 and now.minute < 15) or (now.hour == 15 and now.minute > 30):
     is_open = False
 
-st.title(f"🏹 Nifty 50 Precision Terminal {'🟢' if is_open else '⚪'}")
-st.write(f"IST Time: **{now.strftime('%H:%M:%S')}** | Refresh: 1 Min")
-
-st.sidebar.header("🛡️ Strategy Settings")
-cap = st.sidebar.number_input("Capital (₹)", value=50000)
-risk_p = st.sidebar.slider("Risk (%)", 0.5, 5.0, 1.0)
-
-# --- 4. DATA ENGINE ---
-@st.cache_data(ttl=60)
-def get_live_data():
-    # Fetching 2 years for DMA/RSI and 1 day for Real
+st.title(f"🏹 Nifty 50 Precision Terminal {'🟢'
