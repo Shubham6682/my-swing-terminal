@@ -5,20 +5,19 @@ import datetime
 import pytz
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. SETTINGS & HIGH-SPEED REFRESH ---
-st.set_page_config(page_title="Nifty 50 Precision Terminal", layout="wide")
+# --- 1. CONFIGURATION ---
+st.set_page_config(page_title="Nifty 50 Terminal", layout="wide")
 
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
-# Market Hours: 9:15 AM - 3:30 PM IST
+# Market Status for Refresh Logic
 is_open = (now.weekday() < 5) and (9 <= now.hour < 16)
 if (now.hour == 9 and now.minute < 15) or (now.hour == 15 and now.minute > 30):
     is_open = False
 
-# Refresh indices every 5 seconds for speed without hitting rate limits
-refresh_rate = 5000 if is_open else 60000
-st_autorefresh(interval=refresh_rate, key="precisionsync")
+# Background refresh: 5s if open, 60s if closed
+st_autorefresh(interval=5000 if is_open else 60000, key="silent_sync")
 
 # --- 2. MASTER TICKER LIST ---
 NIFTY_50 = [
@@ -35,58 +34,51 @@ NIFTY_50 = [
 ]
 
 # --- 3. PRECISION INDEX HEADER ---
-def display_precision_header():
-    # Fetching 5-day history to get the TRUE 'Previous Close' for accurate %
+def display_indices():
     indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
-    
     cols = st.columns(len(indices) + 1)
     
     for i, (name, ticker) in enumerate(indices.items()):
         try:
-            # Using Ticker object for more reliable Sensex updates
+            # Independent fetch for stability
             t_obj = yf.Ticker(ticker)
-            # Fast fetch for current price
-            df_live = t_obj.history(period="1d", interval="1m")
-            # Fetch for yesterday's close
-            df_hist = t_obj.history(period="2d")
+            df = t_obj.history(period="2d", interval="1m")
             
-            if not df_live.empty and not df_hist.empty:
-                curr_p = df_live['Close'].iloc[-1]
-                # prev_close is the close of the previous trading day
-                prev_close = df_hist['Close'].iloc[-2]
+            if not df.empty:
+                curr = df['Close'].iloc[-1]
+                # Day percentage based on previous day's close (official method)
+                prev_close = t_obj.history(period="2d")['Close'].iloc[0]
+                change = curr - prev_close
+                pct = (change / prev_close) * 100
                 
-                change = curr_p - prev_close
-                pct_change = (change / prev_close) * 100
-                
-                cols[i].metric(name, f"{curr_p:,.2f}", f"{change:+.2f} ({pct_change:+.2f}%)")
+                cols[i].metric(name, f"{curr:,.2f}", f"{change:+.2f} ({pct:+.2f}%)")
             else:
-                cols[i].metric(name, "N/A", "Loading...")
+                cols[i].metric(name, "N/A")
         except:
-            cols[i].metric(name, "Sensex", "Syncing...")
+            cols[i].metric(name, "N/A")
 
-    status = "🟢 LIVE" if is_open else "⚪ CLOSED"
-    cols[-1].markdown(f"**Market:** {status}\n\n**Sync:** 5s")
+    status_txt = "🟢 MARKET OPEN" if is_open else "⚪ MARKET CLOSED"
+    cols[-1].write(f"**{status_txt}**")
+    cols[-1].write(f"IST: {now.strftime('%H:%M:%S')}")
 
-display_precision_header()
+display_indices()
 st.divider()
 
 # --- 4. SIDEBAR ---
 st.sidebar.header("🛡️ Trade Settings")
 cap = st.sidebar.number_input("Capital (₹)", value=50000)
 risk_p = st.sidebar.slider("Risk (%)", 0.5, 5.0, 1.0)
-if st.sidebar.button("Force Hard Refresh"):
-    st.cache_data.clear()
 
 # --- 5. STOCK SCANNER ---
 @st.cache_data(ttl=30)
-def get_stock_data():
+def get_stocks():
     h = yf.download(NIFTY_50, period="2y", interval="1d", progress=False)
     l = yf.download(NIFTY_50, period="1d", interval="1m", progress=False)
     return h, l
 
 try:
-    with st.spinner("Analyzing 50 Stocks..."):
-        h_data, l_data = get_stock_data()
+    with st.spinner("Analyzing..."):
+        h_data, l_data = get_stocks()
 
     results = []
     total_prof = 0.0
@@ -94,9 +86,10 @@ try:
     for t in NIFTY_50:
         try:
             hc, lc = h_data['Close'][t].dropna(), l_data['Close'][t].dropna()
+            # Failsafe price
             price = float(lc.iloc[-1]) if not lc.empty else float(hc.iloc[-1])
             
-            # Technical Indicators
+            # Indicators
             dma200 = float(hc.rolling(200).mean().iloc[-1])
             delta = hc.diff()
             gain = delta.where(delta > 0, 0).rolling(14).mean()
@@ -126,6 +119,7 @@ try:
 
     if results:
         df = pd.DataFrame(results)
+        # Sort BUY to top
         df['s'] = df['Action'].apply(lambda x: 0 if x == "✅ BUY" else 1)
         df = df.sort_values('s').drop(columns=['s'])
         
@@ -134,4 +128,4 @@ try:
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 except Exception:
-    st.info("Market stream initializing...")
+    st.info("Terminal is live. Data streaming...")
