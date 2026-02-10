@@ -6,8 +6,21 @@ import pytz
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURATION ---
-st.set_page_config(page_title="Nifty 50 Terminal", layout="wide")
-st_autorefresh(interval=60000, key="datarefresh") # 1-min Sync
+st.set_page_config(page_title="Nifty 50 High-Freq Terminal", layout="wide")
+
+# Determine Market Status for Refresh Rate
+ist = pytz.timezone('Asia/Kolkata')
+now = datetime.datetime.now(ist)
+market_open = False
+if now.weekday() < 5:
+    start = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    end = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    if start <= now <= end:
+        market_open = True
+
+# DUAL REFRESH: 5 seconds for indices if open, 60 seconds for stock logic
+refresh_rate = 5000 if market_open else 60000
+st_autorefresh(interval=refresh_rate, key="datarefresh")
 
 # --- 2. MASTER TICKER LIST ---
 NIFTY_50 = [
@@ -23,94 +36,73 @@ NIFTY_50 = [
     "TATASTEEL.NS", "TECHM.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS"
 ]
 
-# --- 3. MARKET HEADER & STATUS ---
-def display_header():
-    ist = pytz.timezone('Asia/Kolkata')
-    now = datetime.datetime.now(ist)
-    
-    # Precise Market Hours Check (9:15 AM - 3:30 PM)
-    market_open = False
-    if now.weekday() < 5: # Monday to Friday
-        start = now.replace(hour=9, minute=15, second=0, microsecond=0)
-        end = now.replace(hour=15, minute=30, second=0, microsecond=0)
-        if start <= now <= end:
-            market_open = True
-    
-    # Indices Bar
+# --- 3. LIVE INDEX HEADER ---
+def display_header(is_open, current_time):
     indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
+    # Smallest possible fetch for speed
     idx_data = yf.download(list(indices.values()), period="2d", interval="1m", progress=False)
     
     cols = st.columns(len(indices) + 1)
     for i, (name, ticker) in enumerate(indices.items()):
         try:
-            prices = idx_data['Close'][ticker].dropna()
-            if not prices.empty:
-                curr = float(prices.iloc[-1])
-                prev = float(prices.iloc[0])
+            px = idx_data['Close'][ticker].dropna()
+            if not px.empty:
+                curr, prev = float(px.iloc[-1]), float(px.iloc[0])
                 change = curr - prev
                 pct = (change / prev) * 100
                 cols[i].metric(name, f"{curr:,.2f}", f"{change:+.2f} ({pct:+.2f}%)")
             else:
-                cols[i].metric(name, "N/A", "Market Closed")
-        except Exception:
-            cols[i].metric(name, "N/A")
+                cols[i].metric(name, "N/A")
+        except:
+            cols[i].metric(name, "Syncing...")
 
-    status_icon = "🟢 OPEN" if market_open else "⚪ CLOSED"
-    cols[-1].markdown(f"**Status:** {status_icon}\n\n**Time:** {now.strftime('%H:%M:%S')}")
+    status_icon = "🟢 OPEN" if is_open else "⚪ CLOSED"
+    cols[-1].markdown(f"**Status:** {status_icon}\n\n**Update:** Every {refresh_rate/1000}s")
 
-# Run the Header
-display_header()
+display_header(market_open, now)
 st.divider()
 
-# --- 4. SIDEBAR SETTINGS ---
-st.sidebar.header("🛡️ Strategy Settings")
-cap = st.sidebar.number_input("Total Capital (₹)", value=50000)
-risk_p = st.sidebar.slider("Risk per Trade (%)", 0.5, 5.0, 1.0, 0.5)
+# --- 4. SIDEBAR ---
+st.sidebar.header("🛡️ Risk Settings")
+cap = st.sidebar.number_input("Capital (₹)", value=50000)
+risk_p = st.sidebar.slider("Risk (%)", 0.5, 5.0, 1.0)
 
 # --- 5. DATA ENGINE ---
-@st.cache_data(ttl=60)
-def get_market_data():
-    """Fetches historical and live data streams."""
+@st.cache_data(ttl=55) # Cache slightly less than stock refresh to ensure fresh data
+def get_stock_data():
     h = yf.download(NIFTY_50, period="2y", interval="1d", progress=False)
     l = yf.download(NIFTY_50, period="5d", interval="1m", progress=False)
     return h, l
 
 try:
-    with st.spinner("Syncing Terminal..."):
-        h_data, l_data = get_market_data()
+    with st.spinner("Updating Terminal..."):
+        h_data, l_data = get_stock_data()
 
     results = []
-    total_prof_pool = 0.0
+    total_prof = 0.0
 
     for t in NIFTY_50:
         try:
-            h_close = h_data['Close'][t].dropna()
-            l_close = l_data['Close'][t].dropna()
+            hc, lc = h_data['Close'][t].dropna(), l_data['Close'][t].dropna()
+            price = float(lc.iloc[-1]) if not lc.empty else float(hc.iloc[-1])
             
-            # Use 1m price if available, otherwise fallback to last Daily Close
-            price = float(l_close.iloc[-1]) if not l_close.empty else float(h_close.iloc[-1])
-
-            # Indicator Math
-            dma200 = float(h_close.rolling(window=200).mean().iloc[-1])
-            delta = h_close.diff()
-            gain = delta.where(delta > 0, 0).rolling(window=14).mean()
-            loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
+            # Indicators
+            dma200 = float(hc.rolling(200).mean().iloc[-1])
+            delta = hc.diff()
+            gain = delta.where(delta > 0, 0).rolling(14).mean()
+            loss = -delta.where(delta < 0, 0).rolling(14).mean()
             rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
 
-            # Strategy Parameters
+            # Signal & Risk
             is_buy = (price > dma200 and 40 < rsi < 65)
+            stop = float(h_data['Low'][t].tail(20).min()) * 0.985
+            risk_amt = price - stop
             
-            # Risk Logic: 20-day low stop loss
-            low_20 = float(h_data['Low'][t].tail(20).min())
-            stop_loss = low_20 * 0.985
-            risk_amt = price - stop_loss
-            
-            qty = 0
-            profit = 0.0
+            qty, profit = 0, 0.0
             if is_buy and risk_amt > 0:
                 qty = int((cap * (risk_p / 100)) // risk_amt)
                 profit = round(qty * (risk_amt * 2), 2)
-                total_prof_pool += profit
+                total_prof += profit
 
             results.append({
                 "Stock": t.replace(".NS", ""),
@@ -121,24 +113,16 @@ try:
                 "Profit": profit,
                 "RSI": round(rsi, 1)
             })
-        except Exception:
-            continue
+        except: continue
 
     if results:
-        # Create DataFrame
         df = pd.DataFrame(results)
+        df['sort'] = df['Action'].apply(lambda x: 0 if x == "✅ BUY" else 1)
+        df = df.sort_values('sort').drop(columns=['sort'])
         
-        # Sorting Logic: ✅ BUY (Action) will come first alphabetically, or use explicit mapping
-        df['sort_order'] = df['Action'].apply(lambda x: 0 if x == "✅ BUY" else 1)
-        df = df.sort_values(by="sort_order").drop(columns=['sort_order'])
-        
-        # Update Sidebar Metrics
         st.sidebar.markdown("---")
-        st.sidebar.metric("💰 Potential Profit", f"₹{total_prof_pool:,.2f}")
-        st.sidebar.write(f"Risk per trade: ₹{cap*(risk_p/100):.2f}")
-        
-        # Display Table
+        st.sidebar.metric("💰 Potential Profit", f"₹{total_prof:,.2f}")
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 except Exception as e:
-    st.error(f"Waiting for Data Connection... ({e})")
+    st.info("Market connection active. Waiting for data stream...")
