@@ -46,42 +46,8 @@ def display_market_header():
         except:
             cols[i].metric(name, "Fetching...")
 
-    # Market Status Indicator
     ist = pytz.timezone('Asia/Kolkata')
     now = datetime.datetime.now(ist)
     is_open = (9 <= now.hour < 16) and (now.weekday() < 5)
     if (now.hour == 9 and now.minute < 15) or (now.hour == 15 and now.minute > 30):
         is_open = False
-    
-    status = "🟢 OPEN" if is_open else "⚪ CLOSED"
-    cols[-1].markdown(f"**Status:** {status}\n\n**Time:** {now.strftime('%H:%M')}")
-
-# --- UI START ---
-display_market_header()
-st.divider()
-st.title("🏹 Nifty 50 Precision Profit Terminal")
-
-st.sidebar.header("🛡️ Risk & Capital")
-cap = st.sidebar.number_input("Total Capital (₹)", value=50000, step=5000)
-risk_p = st.sidebar.slider("Risk per Trade (%)", 0.5, 5.0, 1.0, 0.5)
-
-with st.spinner("Syncing Live Market Data..."):
-    hist_data = yf.download(NIFTY_50, period="2y", interval="1d", group_by='ticker', progress=False)
-    live_data = yf.download(NIFTY_50, period="1d", interval="1m", group_by='ticker', progress=False)
-
-results = []
-total_profit_pool = 0.0
-
-for t in NIFTY_50:
-    # 1. Setup Default Row
-    row = {"Stock": t.replace(".NS", ""), "Price": 0.0, "Action": "⏳ WAIT", "Qty": 0, "Profit Potential": 0.0}
-    
-    # 2. Extract Data
-    try:
-        if t in hist_data.columns.levels[0] and t in live_data.columns.levels[0]:
-            h_df = hist_data[t].dropna()
-            l_df = live_data[t].dropna()
-            
-            if not h_df.empty and not l_df.empty:
-                price = float(l_df['Close'].iloc[-1])
-                dma200 = float(h_df['Close'].rolling(window=200).mean
