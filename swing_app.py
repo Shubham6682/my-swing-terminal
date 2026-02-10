@@ -30,7 +30,7 @@ def display_header():
     
     # Precise Market Hours Check (9:15 AM - 3:30 PM)
     market_open = False
-    if now.weekday() < 5: # Mon-Fri
+    if now.weekday() < 5: # Monday to Friday
         start = now.replace(hour=9, minute=15, second=0, microsecond=0)
         end = now.replace(hour=15, minute=30, second=0, microsecond=0)
         if start <= now <= end:
@@ -43,7 +43,6 @@ def display_header():
     cols = st.columns(len(indices) + 1)
     for i, (name, ticker) in enumerate(indices.items()):
         try:
-            # Fixed Bracket Syntax here
             prices = idx_data['Close'][ticker].dropna()
             if not prices.empty:
                 curr = float(prices.iloc[-1])
@@ -59,7 +58,7 @@ def display_header():
     status_icon = "🟢 OPEN" if market_open else "⚪ CLOSED"
     cols[-1].markdown(f"**Status:** {status_icon}\n\n**Time:** {now.strftime('%H:%M:%S')}")
 
-# Run Header UI
+# Run the Header
 display_header()
 st.divider()
 
@@ -71,7 +70,7 @@ risk_p = st.sidebar.slider("Risk per Trade (%)", 0.5, 5.0, 1.0, 0.5)
 # --- 5. DATA ENGINE ---
 @st.cache_data(ttl=60)
 def get_market_data():
-    """Syncs historical and live data streams."""
+    """Fetches historical and live data streams."""
     h = yf.download(NIFTY_50, period="2y", interval="1d", progress=False)
     l = yf.download(NIFTY_50, period="5d", interval="1m", progress=False)
     return h, l
@@ -118,7 +117,7 @@ try:
                 "Action": "✅ BUY" if is_buy else "⏳ WAIT",
                 "Price": round(price, 2),
                 "Qty": qty,
-                "Target": round(price + (risk_amt * 2), 2) if is_buy else 0,
+                "Target": round(price + (risk_amt * 2), 2) if is_buy else 0.0,
                 "Profit": profit,
                 "RSI": round(rsi, 1)
             })
@@ -126,11 +125,20 @@ try:
             continue
 
     if results:
-        df = pd.DataFrame(results).sort_values(by="Action")
+        # Create DataFrame
+        df = pd.DataFrame(results)
+        
+        # Sorting Logic: ✅ BUY (Action) will come first alphabetically, or use explicit mapping
+        df['sort_order'] = df['Action'].apply(lambda x: 0 if x == "✅ BUY" else 1)
+        df = df.sort_values(by="sort_order").drop(columns=['sort_order'])
+        
+        # Update Sidebar Metrics
         st.sidebar.markdown("---")
         st.sidebar.metric("💰 Potential Profit", f"₹{total_prof_pool:,.2f}")
         st.sidebar.write(f"Risk per trade: ₹{cap*(risk_p/100):.2f}")
+        
+        # Display Table
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 except Exception as e:
-    st.error(f"Waiting for Data... ({e})")
+    st.error(f"Waiting for Data Connection... ({e})")
