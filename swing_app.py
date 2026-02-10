@@ -5,21 +5,38 @@ import datetime
 import pytz
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURATION ---
+# --- 1. CONFIGURATION & STYLES ---
 st.set_page_config(page_title="Nifty 50 Terminal", layout="wide")
+
+# Custom CSS to make the Index Panel (Metric Row) Sticky
+st.markdown("""
+    <style>
+    div[data-testid="stHorizontalBlock"] {
+        position: sticky;
+        top: 2.8rem;
+        background-color: white;
+        z-index: 999;
+        padding: 10px 0;
+        border-bottom: 1px solid #f0f2f6;
+    }
+    .main .block-container {
+        padding-top: 2rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
-# Market Status for Refresh Logic
+# Market Status Logic
 is_open = (now.weekday() < 5) and (9 <= now.hour < 16)
 if (now.hour == 9 and now.minute < 15) or (now.hour == 15 and now.minute > 30):
     is_open = False
 
-# Background refresh: 5s if open, 60s if closed
+# Silent background refresh
 st_autorefresh(interval=5000 if is_open else 60000, key="silent_sync")
 
-# --- 2. MASTER TICKER LIST ---
+# --- 2. TICKERS ---
 NIFTY_50 = [
     "ADANIENT.NS", "ADANIPORTS.NS", "APOLLOHOSP.NS", "ASIANPAINT.NS", "AXISBANK.NS",
     "BAJAJ-AUTO.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "BEL.NS", "BPCL.NS",
@@ -33,35 +50,34 @@ NIFTY_50 = [
     "TATASTEEL.NS", "TECHM.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS"
 ]
 
-# --- 3. PRECISION INDEX HEADER ---
-def display_indices():
+# --- 3. STICKY INDEX PANEL ---
+def display_sticky_indices():
     indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
     cols = st.columns(len(indices) + 1)
     
     for i, (name, ticker) in enumerate(indices.items()):
         try:
-            # Independent fetch for stability
             t_obj = yf.Ticker(ticker)
-            df = t_obj.history(period="2d", interval="1m")
+            # Fetch 1m for current, 2d for yesterday's close
+            df_live = t_obj.history(period="1d", interval="1m")
+            df_hist = t_obj.history(period="2d")
             
-            if not df.empty:
-                curr = df['Close'].iloc[-1]
-                # Day percentage based on previous day's close (official method)
-                prev_close = t_obj.history(period="2d")['Close'].iloc[0]
-                change = curr - prev_close
-                pct = (change / prev_close) * 100
-                
+            if not df_live.empty and not df_hist.empty:
+                curr = df_live['Close'].iloc[-1]
+                prev = df_hist['Close'].iloc[0]
+                change = curr - prev
+                pct = (change / prev) * 100
                 cols[i].metric(name, f"{curr:,.2f}", f"{change:+.2f} ({pct:+.2f}%)")
             else:
                 cols[i].metric(name, "N/A")
         except:
-            cols[i].metric(name, "N/A")
+            cols[i].metric(name, "Sync Error")
 
-    status_txt = "🟢 MARKET OPEN" if is_open else "⚪ MARKET CLOSED"
-    cols[-1].write(f"**{status_txt}**")
+    status = "🟢 OPEN" if is_open else "⚪ CLOSED"
+    cols[-1].write(f"**{status}**")
     cols[-1].write(f"IST: {now.strftime('%H:%M:%S')}")
 
-display_indices()
+display_sticky_indices()
 st.divider()
 
 # --- 4. SIDEBAR ---
@@ -69,16 +85,16 @@ st.sidebar.header("🛡️ Trade Settings")
 cap = st.sidebar.number_input("Capital (₹)", value=50000)
 risk_p = st.sidebar.slider("Risk (%)", 0.5, 5.0, 1.0)
 
-# --- 5. STOCK SCANNER ---
+# --- 5. DATA ENGINE ---
 @st.cache_data(ttl=30)
-def get_stocks():
+def get_data():
     h = yf.download(NIFTY_50, period="2y", interval="1d", progress=False)
     l = yf.download(NIFTY_50, period="1d", interval="1m", progress=False)
     return h, l
 
 try:
     with st.spinner("Analyzing..."):
-        h_data, l_data = get_stocks()
+        h_data, l_data = get_data()
 
     results = []
     total_prof = 0.0
@@ -86,7 +102,6 @@ try:
     for t in NIFTY_50:
         try:
             hc, lc = h_data['Close'][t].dropna(), l_data['Close'][t].dropna()
-            # Failsafe price
             price = float(lc.iloc[-1]) if not lc.empty else float(hc.iloc[-1])
             
             # Indicators
@@ -119,7 +134,6 @@ try:
 
     if results:
         df = pd.DataFrame(results)
-        # Sort BUY to top
         df['s'] = df['Action'].apply(lambda x: 0 if x == "✅ BUY" else 1)
         df = df.sort_values('s').drop(columns=['s'])
         
@@ -128,4 +142,4 @@ try:
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 except Exception:
-    st.info("Terminal is live. Data streaming...")
+    st.info("Market stream active...")
