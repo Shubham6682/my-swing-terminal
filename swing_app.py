@@ -6,7 +6,7 @@ import pytz
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURATION ---
-st.set_page_config(page_title="Pro-Trader Terminal", layout="wide")
+st.set_page_config(page_title="Pro Swing Terminal", layout="wide")
 
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
@@ -18,22 +18,8 @@ if (now.hour == 9 and now.minute < 15) or (now.hour == 15 and now.minute > 30):
 
 st_autorefresh(interval=10000 if is_open else 60000, key="pro_sync")
 
-# --- 2. THE TICKERS ---
-NIFTY_50 = [
-    "ADANIENT.NS", "ADANIPORTS.NS", "APOLLOHOSP.NS", "ASIANPAINT.NS", "AXISBANK.NS",
-    "BAJAJ-AUTO.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "BEL.NS", "BPCL.NS",
-    "BHARTIARTL.NS", "BRITANNIA.NS", "CIPLA.NS", "COALINDIA.NS", "DRREDDY.NS",
-    "EICHERMOT.NS", "GRASIM.NS", "HCLTECH.NS", "HDFCBANK.NS", "HDFCLIFE.NS",
-    "HEROMOTOCO.NS", "HINDALCO.NS", "HINDUNILVR.NS", "ICICIBANK.NS", "ITC.NS",
-    "INDUSINDBK.NS", "INFY.NS", "JSWSTEEL.NS", "KOTAKBANK.NS", "LT.NS",
-    "LTIM.NS", "M&M.NS", "MARUTI.NS", "NTPC.NS", "NESTLEIND.NS",
-    "ONGC.NS", "POWERGRID.NS", "RELIANCE.NS", "SBILIFE.NS", "SHRIRAMFIN.NS",
-    "SBIN.NS", "SUNPHARMA.NS", "TCS.NS", "TATACONSUM.NS", "TATAMOTORS.NS",
-    "TATASTEEL.NS", "TECHM.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS"
-]
-
-# --- 3. STABLE INDEX HEADER ---
-st.title("🏹 Pro-Trader Swing Terminal")
+# --- 2. INDEX HEADER ---
+st.title("🏹 Pro Swing Terminal")
 indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
 idx_cols = st.columns(len(indices) + 1)
 
@@ -55,56 +41,49 @@ idx_cols[-1].write(f"**{'🟢 OPEN' if is_open else '⚪ CLOSED'}**")
 idx_cols[-1].write(f"{now.strftime('%H:%M:%S')} IST")
 st.divider()
 
-# --- 4. SIDEBAR ---
-st.sidebar.header("🛡️ Risk Management")
-cap = st.sidebar.number_input("Total Capital (₹)", value=50000)
-risk_p = st.sidebar.slider("Risk per Trade (%)", 0.5, 5.0, 1.0)
+# --- 3. SIDEBAR ---
+st.sidebar.header("🛡️ Strategy Control")
+mode = st.sidebar.radio("Scanner Rigidity", ["Normal (Aggressive)", "Pro (Conservative)"])
+cap = st.sidebar.number_input("Capital (₹)", value=50000)
+risk_p = st.sidebar.slider("Risk (%)", 0.5, 5.0, 1.0)
 
-# --- 5. THE PRO ENGINE ---
+# --- 4. DATA ENGINE ---
+NIFTY_50 = ["ADANIENT.NS", "ADANIPORTS.NS", "APOLLOHOSP.NS", "ASIANPAINT.NS", "AXISBANK.NS", "BAJAJ-AUTO.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "BEL.NS", "BPCL.NS", "BHARTIARTL.NS", "BRITANNIA.NS", "CIPLA.NS", "COALINDIA.NS", "DRREDDY.NS", "EICHERMOT.NS", "GRASIM.NS", "HCLTECH.NS", "HDFCBANK.NS", "HDFCLIFE.NS", "HEROMOTOCO.NS", "HINDALCO.NS", "HINDUNILVR.NS", "ICICIBANK.NS", "ITC.NS", "INDUSINDBK.NS", "INFY.NS", "JSWSTEEL.NS", "KOTAKBANK.NS", "LT.NS", "LTIM.NS", "M&M.NS", "MARUTI.NS", "NTPC.NS", "NESTLEIND.NS", "ONGC.NS", "POWERGRID.NS", "RELIANCE.NS", "SBILIFE.NS", "SHRIRAMFIN.NS", "SBIN.NS", "SUNPHARMA.NS", "TCS.NS", "TATACONSUM.NS", "TATAMOTORS.NS", "TATASTEEL.NS", "TECHM.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS"]
+
 @st.cache_data(ttl=30)
-def get_deep_data():
-    # 2 Years for DMA, 6 Months for RS Calculation
-    h = yf.download(NIFTY_50 + ["^NSEI"], period="2y", interval="1d", progress=False)
+def get_data():
+    h = yf.download(NIFTY_50 + ["^NSEI"], period="1y", interval="1d", progress=False)
     l = yf.download(NIFTY_50, period="1d", interval="1m", progress=False)
     return h, l
 
 try:
-    with st.spinner("Running Professional Analysis..."):
-        h_data, l_data = get_deep_data()
+    with st.spinner("Scanning..."):
+        h_data, l_data = get_data()
 
-    # Nifty Performance for RS Calculation
-    nifty_3m_change = (h_data['Close']['^NSEI'].iloc[-1] / h_data['Close']['^NSEI'].iloc[-63]) - 1
-
+    nifty_3m = (h_data['Close']['^NSEI'].iloc[-1] / h_data['Close']['^NSEI'].iloc[-63]) - 1
     results = []
     total_prof = 0.0
 
     for t in NIFTY_50:
         try:
             hc, lc = h_data['Close'][t].dropna(), l_data['Close'][t].dropna()
-            vol_hist = h_data['Volume'][t].dropna()
             price = float(lc.iloc[-1]) if not lc.empty else float(hc.iloc[-1])
             
-            # 1. Trend & RSI
+            # Indicators
             dma200 = hc.rolling(200).mean().iloc[-1]
-            delta = hc.diff()
-            gain = delta.where(delta > 0, 0).rolling(14).mean()
-            loss = -delta.where(delta < 0, 0).rolling(14).mean()
-            rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
-
-            # 2. Volume Surge (Pro Check)
-            avg_vol = vol_hist.tail(20).mean()
-            curr_vol = vol_hist.iloc[-1]
-            vol_multiplier = curr_vol / avg_vol
+            rsi = 100 - (100 / (1 + (hc.diff().where(hc.diff() > 0, 0).rolling(14).mean() / -hc.diff().where(hc.diff() < 0, 0).rolling(14).mean()))).iloc[-1]
             
-            # 3. Relative Strength (Pro Check)
-            stock_3m_change = (hc.iloc[-1] / hc.iloc[-63]) - 1
-            is_outperformer = stock_3m_change > nifty_3m_change
+            # Pro Metrics
+            vol_mult = h_data['Volume'][t].iloc[-1] / h_data['Volume'][t].tail(20).mean()
+            rs_beat = (hc.iloc[-1] / hc.iloc[-63]) - 1 > nifty_3m
 
-            # FINAL PRO SIGNAL
-            # Must be: Above 200DMA AND RSI 40-65 AND Volume > 1.2x Avg AND Beating Nifty
-            is_buy = (price > dma200 and 40 < rsi < 65 and vol_multiplier > 1.2 and is_outperformer)
-            
-            # Risk Math
+            # Filter Logic
+            if mode == "Pro (Conservative)":
+                is_buy = (price > dma200 and 40 < rsi < 65 and vol_mult > 1.1 and rs_beat)
+            else:
+                is_buy = (price > dma200 and 40 < rsi < 70) # More aggressive
+
+            # Risk calculation
             stop = float(h_data['Low'][t].tail(20).min()) * 0.985
             risk_amt = price - stop
             
@@ -116,24 +95,21 @@ try:
 
             results.append({
                 "Stock": t.replace(".NS", ""),
-                "Action": "✅ PRO BUY" if is_buy else "⏳ WAIT",
+                "Action": "✅ BUY" if is_buy else "⏳ WAIT",
                 "Price": round(price, 2),
-                "Qty": qty,
                 "Profit": profit,
                 "RSI": round(rsi, 1),
-                "Vol Multiplier": f"{vol_multiplier:.1f}x",
-                "Beats Nifty": "Yes" if is_outperformer else "No"
+                "Vol": f"{vol_mult:.1f}x",
+                "Beats Nifty": "Yes" if rs_beat else "No"
             })
         except: continue
 
-    if results:
-        df = pd.DataFrame(results)
-        df['s'] = df['Action'].apply(lambda x: 0 if x == "✅ PRO BUY" else 1)
-        df = df.sort_values('s').drop(columns=['s'])
-        
-        st.sidebar.divider()
-        st.sidebar.metric("💰 Pro Potential Profit", f"₹{total_prof:,.2f}")
-        st.dataframe(df, use_container_width=True, hide_index=True, height=600)
+    df = pd.DataFrame(results)
+    df['s'] = df['Action'].apply(lambda x: 0 if x == "✅ BUY" else 1)
+    df = df.sort_values('s').drop(columns=['s'])
+    
+    st.sidebar.metric("💰 Potential Profit", f"₹{total_prof:,.2f}")
+    st.dataframe(df, use_container_width=True, hide_index=True, height=600)
 
-except Exception:
-    st.info("Syncing professional data streams...")
+except Exception as e:
+    st.error(f"Syncing... {e}")
