@@ -35,25 +35,4 @@ st.title("🏹 Nifty 50 Precision Profit Terminal")
 
 # Sidebar - User Inputs
 st.sidebar.header("🛡️ Risk & Capital")
-cap = st.sidebar.number_input("Total Capital (₹)", value=50000, step=5000)
-risk_p = st.sidebar.slider("Risk per Trade (%)", 0.5, 5.0, 1.0, 0.5)
-
-# Clock Logic
-ist = pytz.timezone('Asia/Kolkata')
-now_ist = datetime.datetime.now(ist)
-st.markdown(f"**Live Sync:** `{now_ist.strftime('%H:%M:%S')}` IST")
-
-with st.spinner("Calculating real-time profits..."):
-    # Bulk fetching
-    hist_data = yf.download(NIFTY_50, period="2y", interval="1d", group_by='ticker', progress=False)
-    live_data = yf.download(NIFTY_50, period="1d", interval="1m", group_by='ticker', progress=False)
-
-results = []
-total_profit_pool = 0.0
-
-for t in NIFTY_50:
-    # Default state for every stock
-    row = {"Stock": t.replace(".NS", ""), "Price": 0.0, "Action": "⏳ WAIT", "Qty": 0, "Profit Potential": 0.0, "RSI": 0.0}
-    
-    try:
-        if t in hist_data.columns.levels[0] and t in live_data.columns.levels[0]:
+cap = st.sidebar.number_input("Total Capital (₹)", value
