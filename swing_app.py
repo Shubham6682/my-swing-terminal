@@ -39,17 +39,21 @@ st.subheader(f"Status: {'🟢 LIVE' if (9 <= now.hour < 16 and now.weekday() < 5
 with st.spinner("Analyzing all 50 stocks..."):
     sector_map = get_nifty50_list()
     tickers = list(sector_map.keys())
+    # Period 2y ensures 200 DMA is perfectly accurate
     data = yf.download(tickers, period="2y", interval="1d", group_by='ticker', progress=False)
 
 results = []
 for t in tickers:
     try:
+        if t not in data.columns.levels[0]:
+            continue
+            
         df = data[t].dropna()
         if len(df) < 200: continue
         
         cmp = float(df['Close'].iloc[-1])
         dma_200 = float(df['Close'].rolling(window=200).mean().iloc[-1])
-        rsi = float(calculate_rsi(df['Close']).iloc[-1])
+        rsi_val = float(calculate_rsi(df['Close']).iloc[-1])
         
         # Risk Math
         stop_loss = round(float(df['Low'].tail(20).min()) * 0.985, 2)
@@ -57,15 +61,52 @@ for t in tickers:
         
         if risk_per_share > 0:
             qty = int((cap * (risk_p / 100)) // risk_per_share)
+            
             # FII Check
             fii = "🟢 Accumulating" if (df['Volume'].iloc[-1] > df['Volume'].tail(20).mean() and cmp > df['Open'].iloc[-1]) else "⚪ Neutral"
             
             # CRITERION: Price > 200 DMA AND RSI between 40-65
-            is_valid = (cmp > dma_200 and 40 < rsi < 65)
+            is_valid = (cmp > dma_200 and 40 < rsi_val < 65)
             action = "✅ BUY" if is_valid else "⏳ WAIT"
             
             results.append({
                 "Stock": t.replace(".NS", ""),
                 "Price": round(cmp, 2),
                 "200 DMA": round(dma_200, 2),
-                "RSI": round(
+                "RSI": round(rsi_val, 1),
+                "FII": fii,
+                "Qty": qty,
+                "Action": action,
+                "Sector": sector_map.get(t, "N/A")
+            })
+    except: 
+        continue
+
+if results:
+    full_df = pd.DataFrame(results)
+
+    # --- THE HIGHLIGHTER ENGINE ---
+    def highlight_rows(row):
+        # Red highlight for rows that don't fulfill the BUY criteria
+        if row['Action'] == "⏳ WAIT":
+            return ['background-color: #ff4d4d; color: white'] * len(row)
+        # Green highlight for BUY signals
+        elif row['Action'] == "✅ BUY":
+            return ['background-color: #27ae60; color: white'] * len(row)
+        return [''] * len(row)
+
+    # Display full list as requested
+    st.write("### Nifty 50 Signal Watchlist")
+    try:
+        st.dataframe(
+            full_df.style.apply(highlight_rows, axis=1),
+            use_container_width=True, 
+            hide_index=True
+        )
+    except:
+        # Fallback to plain table if styling fails
+        st.dataframe(full_df, use_container_width=True, hide_index=True)
+else:
+    st.warning("Data sync in progress... If this persists, please check if the market data is available.")
+
+st.info(f"💡 Refreshes every 15 mins. Last Update: {now.strftime('%H:%M:%S')}")
