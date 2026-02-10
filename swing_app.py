@@ -5,38 +5,40 @@ import datetime
 import pytz
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. CONFIGURATION & STYLES ---
+# --- 1. CONFIGURATION ---
 st.set_page_config(page_title="Nifty 50 Terminal", layout="wide")
 
-# Custom CSS to make the Index Panel (Metric Row) Sticky
+# Optimized CSS for Sticky Header - targeting the top block specifically
 st.markdown("""
     <style>
-    div[data-testid="stHorizontalBlock"] {
+    /* This targets the top-most container to keep it pinned */
+    [data-testid="stVerticalBlock"] > div:first-child {
         position: sticky;
-        top: 2.8rem;
-        background-color: white;
+        top: 0;
         z-index: 999;
-        padding: 10px 0;
-        border-bottom: 1px solid #f0f2f6;
+        background-color: white;
+        padding-bottom: 1rem;
+        border-bottom: 2px solid #f0f2f6;
     }
-    .main .block-container {
-        padding-top: 2rem;
-    }
+    /* Hide the 'Running' indicator for a cleaner look */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
     </style>
     """, unsafe_allow_html=True)
 
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
-# Market Status Logic
+# Market Hours: 9:15 AM - 3:30 PM IST
 is_open = (now.weekday() < 5) and (9 <= now.hour < 16)
 if (now.hour == 9 and now.minute < 15) or (now.hour == 15 and now.minute > 30):
     is_open = False
 
-# Silent background refresh
+# Background sync: 5s if open, 60s if closed
 st_autorefresh(interval=5000 if is_open else 60000, key="silent_sync")
 
-# --- 2. TICKERS ---
+# --- 2. MASTER TICKER LIST ---
 NIFTY_50 = [
     "ADANIENT.NS", "ADANIPORTS.NS", "APOLLOHOSP.NS", "ASIANPAINT.NS", "AXISBANK.NS",
     "BAJAJ-AUTO.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "BEL.NS", "BPCL.NS",
@@ -50,15 +52,17 @@ NIFTY_50 = [
     "TATASTEEL.NS", "TECHM.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS"
 ]
 
-# --- 3. STICKY INDEX PANEL ---
-def display_sticky_indices():
+# --- 3. STICKY INDEX CONTAINER ---
+# We wrap this in a container to ensure the CSS pins it correctly
+header_container = st.container()
+
+with header_container:
     indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
     cols = st.columns(len(indices) + 1)
     
     for i, (name, ticker) in enumerate(indices.items()):
         try:
             t_obj = yf.Ticker(ticker)
-            # Fetch 1m for current, 2d for yesterday's close
             df_live = t_obj.history(period="1d", interval="1m")
             df_hist = t_obj.history(period="2d")
             
@@ -71,13 +75,12 @@ def display_sticky_indices():
             else:
                 cols[i].metric(name, "N/A")
         except:
-            cols[i].metric(name, "Sync Error")
+            cols[i].metric(name, "Offline")
 
-    status = "🟢 OPEN" if is_open else "⚪ CLOSED"
-    cols[-1].write(f"**{status}**")
+    status_txt = "🟢 MARKET OPEN" if is_open else "⚪ MARKET CLOSED"
+    cols[-1].write(f"**{status_txt}**")
     cols[-1].write(f"IST: {now.strftime('%H:%M:%S')}")
 
-display_sticky_indices()
 st.divider()
 
 # --- 4. SIDEBAR ---
@@ -85,16 +88,16 @@ st.sidebar.header("🛡️ Trade Settings")
 cap = st.sidebar.number_input("Capital (₹)", value=50000)
 risk_p = st.sidebar.slider("Risk (%)", 0.5, 5.0, 1.0)
 
-# --- 5. DATA ENGINE ---
+# --- 5. DATA SCANNER ---
 @st.cache_data(ttl=30)
-def get_data():
+def get_swing_data():
     h = yf.download(NIFTY_50, period="2y", interval="1d", progress=False)
     l = yf.download(NIFTY_50, period="1d", interval="1m", progress=False)
     return h, l
 
 try:
     with st.spinner("Analyzing..."):
-        h_data, l_data = get_data()
+        h_data, l_data = get_swing_data()
 
     results = []
     total_prof = 0.0
@@ -104,7 +107,7 @@ try:
             hc, lc = h_data['Close'][t].dropna(), l_data['Close'][t].dropna()
             price = float(lc.iloc[-1]) if not lc.empty else float(hc.iloc[-1])
             
-            # Indicators
+            # Indicator Calculations
             dma200 = float(hc.rolling(200).mean().iloc[-1])
             delta = hc.diff()
             gain = delta.where(delta > 0, 0).rolling(14).mean()
@@ -134,6 +137,7 @@ try:
 
     if results:
         df = pd.DataFrame(results)
+        # Pin BUY signals to top
         df['s'] = df['Action'].apply(lambda x: 0 if x == "✅ BUY" else 1)
         df = df.sort_values('s').drop(columns=['s'])
         
@@ -142,4 +146,4 @@ try:
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 except Exception:
-    st.info("Market stream active...")
+    st.info("Market stream active. Refreshing table...")
