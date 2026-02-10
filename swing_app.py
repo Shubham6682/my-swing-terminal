@@ -30,7 +30,7 @@ def display_header():
     
     # Precise Market Hours Check
     market_open = False
-    if now.weekday() < 5: # Mon-Fri
+    if now.weekday() < 5: # Monday to Friday
         start = now.replace(hour=9, minute=15, second=0, microsecond=0)
         end = now.replace(hour=15, minute=30, second=0, microsecond=0)
         if start <= now <= end:
@@ -43,7 +43,6 @@ def display_header():
     cols = st.columns(len(indices) + 1)
     for i, (name, ticker) in enumerate(indices.items()):
         try:
-            # Fallback logic for indices if 1m data is empty
             prices = idx_data['Close'][ticker].dropna()
             if not prices.empty:
                 curr = float(prices.iloc[-1])
@@ -52,51 +51,16 @@ def display_header():
                 pct = (change / prev) * 100
                 cols[i].metric(name, f"{curr:,.2f}", f"{change:+.2f} ({pct:+.2f}%)")
             else:
-                cols[i].metric(name, "N/A", "Waiting for Open")
+                cols[i].metric(name, "N/A", "Market Closed")
         except:
             cols[i].metric(name, "N/A")
 
     status_icon = "🟢 OPEN" if market_open else "⚪ CLOSED"
     cols[-1].markdown(f"**Status:** {status_icon}\n\n**Time:** {now.strftime('%H:%M:%S')}")
 
-# Run Header
+# Run the Header UI
 display_header()
 st.divider()
 
 # --- 4. SIDEBAR SETTINGS ---
-st.sidebar.header("🛡️ Risk & Capital")
-cap = st.sidebar.number_input("Total Capital (₹)", value=50000, step=5000)
-risk_p = st.sidebar.slider("Risk per Trade (%)", 0.5, 5.0, 1.0, 0.5)
-
-# --- 5. DATA ENGINE ---
-@st.cache_data(ttl=60)
-def get_synchronized_data():
-    """Fetches 2y daily history and 5d 1m live data for robust failsafe."""
-    h = yf.download(NIFTY_50, period="2y", interval="1d", progress=False)
-    l = yf.download(NIFTY_50, period="5d", interval="1m", progress=False)
-    return h, l
-
-try:
-    with st.spinner("Syncing Terminal Data..."):
-        h_data, l_data = get_synchronized_data()
-
-    results = []
-    total_prof_pool = 0.0
-
-    for t in NIFTY_50:
-        try:
-            h_close = h_data['Close'][t].dropna()
-            l_close = l_data['Close'][t].dropna()
-            
-            # Failsafe Price: Use 1m if available, otherwise use last Daily Close
-            price = float(l_close.iloc[-1]) if not l_close.empty else float(h_close.iloc[-1])
-
-            # Indicator Logic (Verified Syntax)
-            dma200 = float(h_close.rolling(window=200).mean().iloc[-1])
-            delta = h_close.diff()
-            gain = delta.where(delta > 0, 0).rolling(window=14).mean()
-            loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
-            rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
-
-            # Signal Parameters
-            is_
+st.sidebar.header("
