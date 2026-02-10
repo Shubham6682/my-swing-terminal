@@ -5,22 +5,22 @@ import datetime
 import pytz
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. SETTINGS & DUAL-SPEED REFRESH ---
-st.set_page_config(page_title="Turbo Terminal", layout="wide")
+# --- 1. SETTINGS & HIGH-SPEED REFRESH ---
+st.set_page_config(page_title="Nifty 50 Precision Terminal", layout="wide")
 
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
-# Market Hours Check
+# Market Hours: 9:15 AM - 3:30 PM IST
 is_open = (now.weekday() < 5) and (9 <= now.hour < 16)
 if (now.hour == 9 and now.minute < 15) or (now.hour == 15 and now.minute > 30):
     is_open = False
 
-# TURBO REFRESH: 2 seconds for indices if market is open
-refresh_rate = 2000 if is_open else 60000
-st_autorefresh(interval=refresh_rate, key="turborefresh")
+# Refresh indices every 5 seconds for speed without hitting rate limits
+refresh_rate = 5000 if is_open else 60000
+st_autorefresh(interval=refresh_rate, key="precisionsync")
 
-# --- 2. THE TICKER LIST ---
+# --- 2. MASTER TICKER LIST ---
 NIFTY_50 = [
     "ADANIENT.NS", "ADANIPORTS.NS", "APOLLOHOSP.NS", "ASIANPAINT.NS", "AXISBANK.NS",
     "BAJAJ-AUTO.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "BEL.NS", "BPCL.NS",
@@ -34,51 +34,59 @@ NIFTY_50 = [
     "TATASTEEL.NS", "TECHM.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS"
 ]
 
-# --- 3. FAST-TRACK INDEX HEADER ---
-def display_turbo_header():
+# --- 3. PRECISION INDEX HEADER ---
+def display_precision_header():
+    # Fetching 5-day history to get the TRUE 'Previous Close' for accurate %
     indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
-    cols = st.columns(len(indices) + 1)
     
-    # We use a very light 1-day fetch for the fastest possible response
-    idx_data = yf.download(list(indices.values()), period="1d", interval="1m", progress=False, group_by='ticker')
+    cols = st.columns(len(indices) + 1)
     
     for i, (name, ticker) in enumerate(indices.items()):
         try:
-            df = idx_data[ticker].dropna()
-            if not df.empty:
-                curr = df['Close'].iloc[-1]
-                # Day change based on previous minute (for high speed feel)
-                prev = df['Open'].iloc[0]
-                change = curr - prev
-                pct = (change / prev) * 100
-                cols[i].metric(name, f"{curr:,.2f}", f"{change:+.2f} ({pct:+.2f}%)")
+            # Using Ticker object for more reliable Sensex updates
+            t_obj = yf.Ticker(ticker)
+            # Fast fetch for current price
+            df_live = t_obj.history(period="1d", interval="1m")
+            # Fetch for yesterday's close
+            df_hist = t_obj.history(period="2d")
+            
+            if not df_live.empty and not df_hist.empty:
+                curr_p = df_live['Close'].iloc[-1]
+                # prev_close is the close of the previous trading day
+                prev_close = df_hist['Close'].iloc[-2]
+                
+                change = curr_p - prev_close
+                pct_change = (change / prev_close) * 100
+                
+                cols[i].metric(name, f"{curr_p:,.2f}", f"{change:+.2f} ({pct_change:+.2f}%)")
             else:
-                cols[i].metric(name, "Connecting...")
+                cols[i].metric(name, "N/A", "Loading...")
         except:
-            cols[i].metric(name, "Wait...")
+            cols[i].metric(name, "Sensex", "Syncing...")
 
     status = "🟢 LIVE" if is_open else "⚪ CLOSED"
-    cols[-1].markdown(f"**Market:** {status}\n\n**Next Sync:** 2s")
+    cols[-1].markdown(f"**Market:** {status}\n\n**Sync:** 5s")
 
-display_turbo_header()
+display_precision_header()
 st.divider()
 
 # --- 4. SIDEBAR ---
 st.sidebar.header("🛡️ Trade Settings")
 cap = st.sidebar.number_input("Capital (₹)", value=50000)
 risk_p = st.sidebar.slider("Risk (%)", 0.5, 5.0, 1.0)
-st.sidebar.caption("Indices refresh: 2s | Stocks: 30s")
+if st.sidebar.button("Force Hard Refresh"):
+    st.cache_data.clear()
 
-# --- 5. STOCK ENGINE (Optimized 30s TTL) ---
+# --- 5. STOCK SCANNER ---
 @st.cache_data(ttl=30)
-def get_swing_data():
+def get_stock_data():
     h = yf.download(NIFTY_50, period="2y", interval="1d", progress=False)
     l = yf.download(NIFTY_50, period="1d", interval="1m", progress=False)
     return h, l
 
 try:
-    with st.spinner("Calculating Signals..."):
-        h_data, l_data = get_swing_data()
+    with st.spinner("Analyzing 50 Stocks..."):
+        h_data, l_data = get_stock_data()
 
     results = []
     total_prof = 0.0
@@ -86,9 +94,9 @@ try:
     for t in NIFTY_50:
         try:
             hc, lc = h_data['Close'][t].dropna(), l_data['Close'][t].dropna()
-            # Use 1m price for real-time entry feel
             price = float(lc.iloc[-1]) if not lc.empty else float(hc.iloc[-1])
             
+            # Technical Indicators
             dma200 = float(hc.rolling(200).mean().iloc[-1])
             delta = hc.diff()
             gain = delta.where(delta > 0, 0).rolling(14).mean()
@@ -122,9 +130,8 @@ try:
         df = df.sort_values('s').drop(columns=['s'])
         
         st.sidebar.markdown("---")
-        st.sidebar.metric("💰 Today's Potential Profit", f"₹{total_prof:,.2f}")
-        
+        st.sidebar.metric("💰 Potential Profit", f"₹{total_prof:,.2f}")
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 except Exception:
-    st.info("Market stream is heating up. Loading data...")
+    st.info("Market stream initializing...")
