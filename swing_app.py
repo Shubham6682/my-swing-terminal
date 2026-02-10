@@ -5,7 +5,7 @@ import datetime
 import pytz
 from streamlit_autorefresh import st_autorefresh
 
-# --- 1. SETTINGS ---
+# --- 1. CONFIGURATION ---
 st.set_page_config(page_title="Nifty 50 Terminal", layout="wide")
 st_autorefresh(interval=60000, key="datarefresh") # 1-min Sync
 
@@ -23,21 +23,80 @@ NIFTY_50 = [
     "TATASTEEL.NS", "TECHM.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS"
 ]
 
-# --- 3. MARKET STATUS LOGIC ---
-ist = pytz.timezone('Asia/Kolkata')
-now = datetime.datetime.now(ist)
+# --- 3. MARKET HEADER & STATUS ---
+def display_header():
+    ist = pytz.timezone('Asia/Kolkata')
+    now = datetime.datetime.now(ist)
+    
+    # Precise Market Hours Check
+    market_open = False
+    if now.weekday() < 5: # Mon-Fri
+        start = now.replace(hour=9, minute=15, second=0, microsecond=0)
+        end = now.replace(hour=15, minute=30, second=0, microsecond=0)
+        if start <= now <= end:
+            market_open = True
+    
+    # Indices Bar
+    indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
+    idx_data = yf.download(list(indices.values()), period="2d", interval="1m", progress=False)
+    
+    cols = st.columns(len(indices) + 1)
+    for i, (name, ticker) in enumerate(indices.items()):
+        try:
+            # Fallback logic for indices if 1m data is empty
+            prices = idx_data['Close'][ticker].dropna()
+            if not prices.empty:
+                curr = float(prices.iloc[-1])
+                prev = float(prices.iloc[0])
+                change = curr - prev
+                pct = (change / prev) * 100
+                cols[i].metric(name, f"{curr:,.2f}", f"{change:+.2f} ({pct:+.2f}%)")
+            else:
+                cols[i].metric(name, "N/A", "Waiting for Open")
+        except:
+            cols[i].metric(name, "N/A")
 
-# Simplified Market Status logic to prevent SyntaxErrors in f-strings
-market_is_open = False
-if now.weekday() < 5: # Monday to Friday
-    # 9:15 AM to 3:30 PM
-    start_time = now.replace(hour=9, minute=15, second=0, microsecond=0)
-    end_time = now.replace(hour=15, minute=30, second=0, microsecond=0)
-    if start_time <= now <= end_time:
-        market_is_open = True
+    status_icon = "🟢 OPEN" if market_open else "⚪ CLOSED"
+    cols[-1].markdown(f"**Status:** {status_icon}\n\n**Time:** {now.strftime('%H:%M:%S')}")
 
-status_icon = "🟢 OPEN" if market_is_open else "⚪ CLOSED"
+# Run Header
+display_header()
+st.divider()
 
-# --- 4. UI START ---
-st.title(f"🏹 Nifty 50 Precision Terminal {status_icon}")
-st.write(f"IST Time: **{now.strftime('%H:%M:%S')}** | Auto-Refresh: 1 Min")
+# --- 4. SIDEBAR SETTINGS ---
+st.sidebar.header("🛡️ Risk & Capital")
+cap = st.sidebar.number_input("Total Capital (₹)", value=50000, step=5000)
+risk_p = st.sidebar.slider("Risk per Trade (%)", 0.5, 5.0, 1.0, 0.5)
+
+# --- 5. DATA ENGINE ---
+@st.cache_data(ttl=60)
+def get_synchronized_data():
+    """Fetches 2y daily history and 5d 1m live data for robust failsafe."""
+    h = yf.download(NIFTY_50, period="2y", interval="1d", progress=False)
+    l = yf.download(NIFTY_50, period="5d", interval="1m", progress=False)
+    return h, l
+
+try:
+    with st.spinner("Syncing Terminal Data..."):
+        h_data, l_data = get_synchronized_data()
+
+    results = []
+    total_prof_pool = 0.0
+
+    for t in NIFTY_50:
+        try:
+            h_close = h_data['Close'][t].dropna()
+            l_close = l_data['Close'][t].dropna()
+            
+            # Failsafe Price: Use 1m if available, otherwise use last Daily Close
+            price = float(l_close.iloc[-1]) if not l_close.empty else float(h_close.iloc[-1])
+
+            # Indicator Logic (Verified Syntax)
+            dma200 = float(h_close.rolling(window=200).mean().iloc[-1])
+            delta = h_close.diff()
+            gain = delta.where(delta > 0, 0).rolling(window=14).mean()
+            loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
+            rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
+
+            # Signal Parameters
+            is_
