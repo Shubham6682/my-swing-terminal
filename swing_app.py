@@ -6,9 +6,9 @@ import pytz
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURATION ---
-st.set_page_config(page_title="Nifty 50 High-Freq Terminal", layout="wide")
+st.set_page_config(page_title="Nifty 50 Live Terminal", layout="wide")
 
-# Determine Market Status for Refresh Rate
+# Determine Market Status
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 market_open = False
@@ -18,11 +18,11 @@ if now.weekday() < 5:
     if start <= now <= end:
         market_open = True
 
-# DUAL REFRESH: 5 seconds for indices if open, 60 seconds for stock logic
+# High-frequency refresh for indices during market hours
 refresh_rate = 5000 if market_open else 60000
 st_autorefresh(interval=refresh_rate, key="datarefresh")
 
-# --- 2. MASTER TICKER LIST ---
+# --- 2. TICKERS ---
 NIFTY_50 = [
     "ADANIENT.NS", "ADANIPORTS.NS", "APOLLOHOSP.NS", "ASIANPAINT.NS", "AXISBANK.NS",
     "BAJAJ-AUTO.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "BEL.NS", "BPCL.NS",
@@ -36,46 +36,51 @@ NIFTY_50 = [
     "TATASTEEL.NS", "TECHM.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS"
 ]
 
-# --- 3. LIVE INDEX HEADER ---
-def display_header(is_open, current_time):
+# --- 3. IMPROVED INDEX SYNC ---
+def display_header(is_open):
     indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
-    # Smallest possible fetch for speed
-    idx_data = yf.download(list(indices.values()), period="2d", interval="1m", progress=False)
-    
     cols = st.columns(len(indices) + 1)
+    
     for i, (name, ticker) in enumerate(indices.items()):
         try:
-            px = idx_data['Close'][ticker].dropna()
-            if not px.empty:
-                curr, prev = float(px.iloc[-1]), float(px.iloc[0])
+            # Fetching individually for stability
+            idx = yf.Ticker(ticker)
+            # Fetch 1-day for current and previous close
+            df = idx.history(period="2d", interval="1m")
+            
+            if not df.empty:
+                curr = df['Close'].iloc[-1]
+                prev = df['Close'].iloc[0]
                 change = curr - prev
                 pct = (change / prev) * 100
                 cols[i].metric(name, f"{curr:,.2f}", f"{change:+.2f} ({pct:+.2f}%)")
             else:
-                cols[i].metric(name, "N/A")
+                cols[i].metric(name, "Offline", "Waiting for data")
         except:
-            cols[i].metric(name, "Syncing...")
+            cols[i].metric(name, "Error", "Sync Lag")
 
-    status_icon = "🟢 OPEN" if is_open else "⚪ CLOSED"
-    cols[-1].markdown(f"**Status:** {status_icon}\n\n**Update:** Every {refresh_rate/1000}s")
+    status = "🟢 OPEN" if is_open else "⚪ CLOSED"
+    cols[-1].markdown(f"**Status:** {status}\n\n**Time:** {datetime.datetime.now(ist).strftime('%H:%M:%S')}")
 
-display_header(market_open, now)
+display_header(market_open)
 st.divider()
 
 # --- 4. SIDEBAR ---
 st.sidebar.header("🛡️ Risk Settings")
 cap = st.sidebar.number_input("Capital (₹)", value=50000)
 risk_p = st.sidebar.slider("Risk (%)", 0.5, 5.0, 1.0)
+if st.sidebar.button("🔄 Force Data Refresh"):
+    st.cache_data.clear()
 
 # --- 5. DATA ENGINE ---
-@st.cache_data(ttl=55) # Cache slightly less than stock refresh to ensure fresh data
+@st.cache_data(ttl=55)
 def get_stock_data():
     h = yf.download(NIFTY_50, period="2y", interval="1d", progress=False)
     l = yf.download(NIFTY_50, period="5d", interval="1m", progress=False)
     return h, l
 
 try:
-    with st.spinner("Updating Terminal..."):
+    with st.spinner("Analyzing Market Trends..."):
         h_data, l_data = get_stock_data()
 
     results = []
@@ -84,6 +89,7 @@ try:
     for t in NIFTY_50:
         try:
             hc, lc = h_data['Close'][t].dropna(), l_data['Close'][t].dropna()
+            # Fail-safe price selection
             price = float(lc.iloc[-1]) if not lc.empty else float(hc.iloc[-1])
             
             # Indicators
@@ -93,7 +99,7 @@ try:
             loss = -delta.where(delta < 0, 0).rolling(14).mean()
             rsi = 100 - (100 / (1 + (gain / loss))).iloc[-1]
 
-            # Signal & Risk
+            # Logic
             is_buy = (price > dma200 and 40 < rsi < 65)
             stop = float(h_data['Low'][t].tail(20).min()) * 0.985
             risk_amt = price - stop
@@ -124,5 +130,5 @@ try:
         st.sidebar.metric("💰 Potential Profit", f"₹{total_prof:,.2f}")
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-except Exception as e:
-    st.info("Market connection active. Waiting for data stream...")
+except Exception:
+    st.info("Market is initializing. Please wait 30 seconds for the first live tick.")
