@@ -30,7 +30,7 @@ def display_header():
     
     # Precise Market Hours Check
     market_open = False
-    if now.weekday() < 5: # Monday to Friday
+    if now.weekday() < 5: # Mon-Fri
         start = now.replace(hour=9, minute=15, second=0, microsecond=0)
         end = now.replace(hour=15, minute=30, second=0, microsecond=0)
         if start <= now <= end:
@@ -43,24 +43,4 @@ def display_header():
     cols = st.columns(len(indices) + 1)
     for i, (name, ticker) in enumerate(indices.items()):
         try:
-            prices = idx_data['Close'][ticker].dropna()
-            if not prices.empty:
-                curr = float(prices.iloc[-1])
-                prev = float(prices.iloc[0])
-                change = curr - prev
-                pct = (change / prev) * 100
-                cols[i].metric(name, f"{curr:,.2f}", f"{change:+.2f} ({pct:+.2f}%)")
-            else:
-                cols[i].metric(name, "N/A", "Market Closed")
-        except:
-            cols[i].metric(name, "N/A")
-
-    status_icon = "🟢 OPEN" if market_open else "⚪ CLOSED"
-    cols[-1].markdown(f"**Status:** {status_icon}\n\n**Time:** {now.strftime('%H:%M:%S')}")
-
-# Run the Header UI
-display_header()
-st.divider()
-
-# --- 4. SIDEBAR SETTINGS ---
-st.sidebar.header("
+            prices = idx_data['Close'][ticker
