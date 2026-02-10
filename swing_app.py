@@ -9,7 +9,7 @@ from streamlit_autorefresh import st_autorefresh
 st.set_page_config(page_title="Nifty 50 Terminal", layout="wide")
 st_autorefresh(interval=60000, key="datarefresh") # 1-min Sync
 
-# --- 2. TICKERS ---
+# --- 2. MASTER TICKER LIST ---
 NIFTY_50 = [
     "ADANIENT.NS", "ADANIPORTS.NS", "APOLLOHOSP.NS", "ASIANPAINT.NS", "AXISBANK.NS",
     "BAJAJ-AUTO.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "BEL.NS", "BPCL.NS",
@@ -23,11 +23,21 @@ NIFTY_50 = [
     "TATASTEEL.NS", "TECHM.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS"
 ]
 
-# --- 3. UI ---
+# --- 3. MARKET STATUS LOGIC ---
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
-is_open = (9 <= now.hour < 16) and (now.weekday() < 5)
-if (now.hour == 9 and now.minute < 15) or (now.hour == 15 and now.minute > 30):
-    is_open = False
 
-st.title(f"🏹 Nifty 50 Precision Terminal {'🟢'
+# Simplified Market Status logic to prevent SyntaxErrors in f-strings
+market_is_open = False
+if now.weekday() < 5: # Monday to Friday
+    # 9:15 AM to 3:30 PM
+    start_time = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    end_time = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    if start_time <= now <= end_time:
+        market_is_open = True
+
+status_icon = "🟢 OPEN" if market_is_open else "⚪ CLOSED"
+
+# --- 4. UI START ---
+st.title(f"🏹 Nifty 50 Precision Terminal {status_icon}")
+st.write(f"IST Time: **{now.strftime('%H:%M:%S')}** | Auto-Refresh: 1 Min")
