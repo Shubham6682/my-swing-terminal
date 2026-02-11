@@ -40,7 +40,7 @@ idx_cols[-1].write(f"**{'🟢 OPEN' if is_open else '⚪ CLOSED'}**")
 idx_cols[-1].write(f"{now.strftime('%H:%M:%S')} IST")
 st.divider()
 
-# --- 3. SIDEBAR CONTROLS ---
+# --- 3. SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ View Settings")
     view_mode = st.radio("Display Mode", ["Simple (Focus)", "Pro (Deep-Dive)"])
@@ -64,7 +64,6 @@ with tab1:
 
     try:
         h_data, l_data = get_market_data()
-        n_perf = (h_data['Close']['^NSEI'].iloc[-1] / h_data['Close']['^NSEI'].iloc[-63]) - 1
         results = []
 
         for t in NIFTY_50:
@@ -92,15 +91,15 @@ with tab1:
         df = pd.DataFrame(results)
         df['s'] = df['Action'].apply(lambda x: 0 if "BUY" in x else 1)
         st.dataframe(df.sort_values('s').drop(columns=['s']), use_container_width=True, hide_index=True, height=500)
-    except: st.info("Scanning...")
+    except: st.info("Scanning Market Scanner...")
 
-# --- TAB 2: PORTFOLIO (FIXED) ---
+# --- TAB 2: PORTFOLIO (THE ERROR FIX IS HERE) ---
 with tab2:
     st.subheader("🚀 Practice Trading")
     p1, p2, p3 = st.columns(3)
-    vt = p1.text_input("Stock Name (e.g. HAL):").upper()
-    vq = p2.number_input("Qty:", min_value=1, value=1)
-    vp = p3.number_input("Entry Price:", min_value=0.1, value=100.0)
+    vt = p1.text_input("Stock Name (e.g. HAL):", key="vt_input").upper()
+    vq = p2.number_input("Qty:", min_value=1, value=1, key="vq_input")
+    vp = p3.number_input("Entry Price:", min_value=0.1, value=100.0, key="vp_input")
     
     if st.button("🚀 Execute Trade"):
         if vt:
@@ -113,24 +112,35 @@ with tab2:
         p_list = list(set([i['Ticker'] for i in st.session_state.portfolio]))
         
         # Fresh Fetch for Portfolio
-        c_data = yf.download(p_list, period="1d", interval="1m", progress=False)['Close']
+        c_data_raw = yf.download(p_list, period="1d", interval="1m", progress=False)['Close']
         
         for i in st.session_state.portfolio:
             try:
-                # Handle single vs multi-index dataframe
+                # FIX: Force extraction of raw float value to avoid TypeError
                 if len(p_list) > 1:
-                    c_px = c_data[i['Ticker']].dropna().iloc[-1]
+                    raw_val = c_data_raw[i['Ticker']].dropna().iloc[-1]
                 else:
-                    c_px = c_data.dropna().iloc[-1]
+                    raw_val = c_data_raw.dropna().iloc[-1]
                 
+                # Convert explicitly to float to strip metadata
+                c_px = float(raw_val)
                 pnl = (c_px - i['BuyPrice']) * i['Qty']
                 total_pnl += pnl
-                p_res.append({"Stock": i['Symbol'], "Qty": i['Qty'], "Entry": i['BuyPrice'], "Current": round(c_px, 2), "P&L": round(pnl, 2)})
-            except: continue
+                p_res.append({
+                    "Stock": i['Symbol'], 
+                    "Qty": i['Qty'], 
+                    "Entry": round(float(i['BuyPrice']), 2), 
+                    "Current": round(c_px, 2), 
+                    "P&L": round(float(pnl), 2)
+                })
+            except Exception as e:
+                continue
         
-        st.dataframe(pd.DataFrame(p_res), use_container_width=True, hide_index=True)
-        # FIXED: delta passed as raw float, not formatted string
-        st.metric("Total Unrealized P&L", f"₹{total_pnl:,.2f}", delta=round(total_pnl, 2))
+        if p_res:
+            st.dataframe(pd.DataFrame(p_res), use_container_width=True, hide_index=True)
+            # The Final Metric fix: Passing clean float to delta
+            st.metric("Total Unrealized P&L", f"₹{total_pnl:,.2f}", delta=round(float(total_pnl), 2))
+        
         if st.button("Reset Portfolio"): 
             st.session_state.portfolio = []
             st.rerun()
@@ -138,14 +148,4 @@ with tab2:
 # --- TAB 3: WATCHLIST ---
 with tab3:
     st.subheader("🔍 Watchlist")
-    lu = st.text_input("Search Ticker:").upper()
-    if lu:
-        try:
-            p = yf.Ticker(f"{lu}.NS").history(period="1d")['Close'].iloc[-1]
-            st.write(f"**Price:** ₹{p:,.2f}")
-            if st.button(f"Add {lu}"):
-                if lu not in st.session_state.watchlist: st.session_state.watchlist.append(lu)
-        except: st.error("Not found.")
-    st.divider()
-    for s in st.session_state.watchlist: st.write(f"🔹 {s}")
-    if st.button("Clear Watchlist"): st.session_state.watchlist = []; st.rerun()
+    lu = st.
