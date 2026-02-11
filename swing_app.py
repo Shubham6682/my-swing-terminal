@@ -43,8 +43,7 @@ st.divider()
 # --- 3. SIDEBAR CONTROLS ---
 with st.sidebar:
     st.header("⚙️ View Settings")
-    view_mode = st.radio("Display Mode", ["Simple (Focus)", "Pro (Deep-Dive)"], help="Simple mode hides complex technical filters for a cleaner view.")
-    
+    view_mode = st.radio("Display Mode", ["Simple (Focus)", "Pro (Deep-Dive)"])
     st.divider()
     st.header("🛡️ Strategy Control")
     cap = st.number_input("Total Capital", value=50000)
@@ -72,55 +71,36 @@ with tab1:
             try:
                 hc, lc = h_data['Close'][t].dropna(), l_data['Close'][t].dropna()
                 price = float(lc.iloc[-1]) if not lc.empty else float(hc.iloc[-1])
-                
-                # Math
                 dma200 = hc.rolling(200).mean().iloc[-1]
                 delta = hc.diff()
                 rsi = 100 - (100 / (1 + (delta.where(delta > 0, 0).rolling(14).mean() / -delta.where(delta < 0, 0).rolling(14).mean()))).iloc[-1]
-                adr = ((h_data['High'][t] - h_data['Low'][t]) / h_data['Low'][t]).tail(20).mean() * 100
-                tightness = ((hc.tail(5).max() - hc.tail(5).min()) / hc.tail(5).min()) * 100
-                vol_m = h_data['Volume'][t].iloc[-1] / h_data['Volume'][t].tail(20).mean()
-                rs_b = (hc.iloc[-1] / hc.iloc[-63]) - 1 > n_perf
-
-                is_buy = (price > dma200 and 40 < rsi < 65)
                 
+                is_buy = (price > dma200 and 40 < rsi < 65)
                 stop = float(h_data['Low'][t].tail(20).min()) * 0.985
                 risk_ps = price - stop
-                qty = int((cap * (risk_p / 100)) // risk_ps) if risk_ps > 0 else 0
-                if qty == 0 and cap >= price: qty = 1
+                qty = int((cap * (risk_p / 100)) // risk_ps) if risk_ps > 0 else 1
                 
-                res = {
-                    "Stock": t.replace(".NS", ""),
-                    "Action": "✅ BUY" if is_buy else "⏳ WAIT",
-                    "Price": round(price, 2),
-                    "StopLoss": round(stop, 2),
-                    "Profit": round(qty * (risk_ps * 2), 2),
-                    "RSI": round(rsi, 1),
-                }
+                res = {"Stock": t.replace(".NS", ""), "Action": "✅ BUY" if is_buy else "⏳ WAIT", "Price": round(price, 2), "StopLoss": round(stop, 2), "Profit": round(qty * (risk_ps * 2), 2), "RSI": round(rsi, 1)}
                 
-                # Add Pro Metrics ONLY if in Pro Mode
                 if view_mode == "Pro (Deep-Dive)":
-                    res["ADR%"] = round(adr, 2)
-                    res["Tight%"] = round(tightness, 2)
-                    res["Vol"] = f"{vol_m:.1f}x"
-                    res["Leader"] = "Yes" if rs_b else "No"
-                
+                    res["ADR%"] = round(((h_data['High'][t] - h_data['Low'][t]) / h_data['Low'][t]).tail(20).mean() * 100, 2)
+                    res["Tight%"] = round(((hc.tail(5).max() - hc.tail(5).min()) / hc.tail(5).min()) * 100, 2)
+                    res["Vol"] = f"{h_data['Volume'][t].iloc[-1] / h_data['Volume'][t].tail(20).mean():.1f}x"
                 results.append(res)
             except: continue
 
         df = pd.DataFrame(results)
         df['s'] = df['Action'].apply(lambda x: 0 if "BUY" in x else 1)
-        df = df.sort_values('s').drop(columns=['s'])
-        st.dataframe(df, use_container_width=True, hide_index=True, height=600)
+        st.dataframe(df.sort_values('s').drop(columns=['s']), use_container_width=True, hide_index=True, height=500)
     except: st.info("Scanning...")
 
-# --- TAB 2: PORTFOLIO ---
+# --- TAB 2: PORTFOLIO (FIXED) ---
 with tab2:
     st.subheader("🚀 Practice Trading")
-    p_col1, p_col2, p_col3 = st.columns(3)
-    with p_col1: vt = st.text_input("Stock:", key="vt").upper()
-    with p_col2: vq = st.number_input("Qty:", min_value=1, value=1)
-    with p_col3: vp = st.number_input("Entry Price:", min_value=0.1, value=100.0)
+    p1, p2, p3 = st.columns(3)
+    vt = p1.text_input("Stock Name (e.g. HAL):").upper()
+    vq = p2.number_input("Qty:", min_value=1, value=1)
+    vp = p3.number_input("Entry Price:", min_value=0.1, value=100.0)
     
     if st.button("🚀 Execute Trade"):
         if vt:
@@ -130,24 +110,34 @@ with tab2:
     if st.session_state.portfolio:
         p_res = []
         total_pnl = 0.0
-        p_list = [i['Ticker'] for i in st.session_state.portfolio]
+        p_list = list(set([i['Ticker'] for i in st.session_state.portfolio]))
+        
+        # Fresh Fetch for Portfolio
         c_data = yf.download(p_list, period="1d", interval="1m", progress=False)['Close']
+        
         for i in st.session_state.portfolio:
             try:
-                c_px = c_data[i['Ticker']].dropna().iloc[-1] if len(p_list)>1 else c_data.dropna().iloc[-1]
+                # Handle single vs multi-index dataframe
+                if len(p_list) > 1:
+                    c_px = c_data[i['Ticker']].dropna().iloc[-1]
+                else:
+                    c_px = c_data.dropna().iloc[-1]
+                
                 pnl = (c_px - i['BuyPrice']) * i['Qty']
                 total_pnl += pnl
                 p_res.append({"Stock": i['Symbol'], "Qty": i['Qty'], "Entry": i['BuyPrice'], "Current": round(c_px, 2), "P&L": round(pnl, 2)})
             except: continue
+        
         st.dataframe(pd.DataFrame(p_res), use_container_width=True, hide_index=True)
-        st.metric("P&L", f"₹{total_pnl:,.2f}", delta=f"{total_pnl:,.2f}")
-        if st.button("Clear"): 
+        # FIXED: delta passed as raw float, not formatted string
+        st.metric("Total Unrealized P&L", f"₹{total_pnl:,.2f}", delta=round(total_pnl, 2))
+        if st.button("Reset Portfolio"): 
             st.session_state.portfolio = []
             st.rerun()
 
-# --- TAB 3: LOOKUP ---
+# --- TAB 3: WATCHLIST ---
 with tab3:
-    st.subheader("🔍 Stock Watchlist")
+    st.subheader("🔍 Watchlist")
     lu = st.text_input("Search Ticker:").upper()
     if lu:
         try:
@@ -155,7 +145,7 @@ with tab3:
             st.write(f"**Price:** ₹{p:,.2f}")
             if st.button(f"Add {lu}"):
                 if lu not in st.session_state.watchlist: st.session_state.watchlist.append(lu)
-        except: st.error("Ticker not found.")
+        except: st.error("Not found.")
     st.divider()
     for s in st.session_state.watchlist: st.write(f"🔹 {s}")
     if st.button("Clear Watchlist"): st.session_state.watchlist = []; st.rerun()
