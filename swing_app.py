@@ -11,12 +11,15 @@ st.set_page_config(page_title="Elite Swing Terminal", layout="wide")
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
+# Market Hours: 9:15 AM - 3:30 PM IST
 is_open = (now.weekday() < 5) and (9 <= now.hour < 16)
 if (now.hour == 9 and now.minute < 15) or (now.hour == 15 and now.minute > 30):
     is_open = False
 
+# Refresh every 15s during market hours
 st_autorefresh(interval=15000 if is_open else 60000, key="elite_sync")
 
+# Initialize Session States
 if 'portfolio' not in st.session_state: st.session_state.portfolio = []
 if 'watchlist' not in st.session_state: st.session_state.watchlist = []
 
@@ -46,8 +49,8 @@ with st.sidebar:
     view_mode = st.radio("Display Mode", ["Simple (Focus)", "Pro (Deep-Dive)"])
     st.divider()
     st.header("🛡️ Strategy Control")
-    cap = st.number_input("Total Capital", value=50000)
-    risk_p = st.slider("Risk (%)", 0.5, 5.0, 1.0)
+    cap = st.number_input("Total Capital (₹)", value=50000)
+    risk_p = st.slider("Risk per Trade (%)", 0.5, 5.0, 1.0)
 
 # --- 4. TABS ---
 tab1, tab2, tab3 = st.tabs(["📊 Market Scanner", "🚀 Virtual Portfolio", "🎯 Watchlist & Lookup"])
@@ -91,17 +94,17 @@ with tab1:
         df = pd.DataFrame(results)
         df['s'] = df['Action'].apply(lambda x: 0 if "BUY" in x else 1)
         st.dataframe(df.sort_values('s').drop(columns=['s']), use_container_width=True, hide_index=True, height=500)
-    except: st.info("Scanning Market Scanner...")
+    except: st.info("Syncing Market Data...")
 
-# --- TAB 2: PORTFOLIO (THE ERROR FIX IS HERE) ---
+# --- TAB 2: PORTFOLIO ---
 with tab2:
-    st.subheader("🚀 Practice Trading")
+    st.subheader("🚀 Practice Trading Portfolio")
     p1, p2, p3 = st.columns(3)
-    vt = p1.text_input("Stock Name (e.g. HAL):", key="vt_input").upper()
-    vq = p2.number_input("Qty:", min_value=1, value=1, key="vq_input")
-    vp = p3.number_input("Entry Price:", min_value=0.1, value=100.0, key="vp_input")
+    vt = p1.text_input("Stock Symbol (e.g. HAL):", key="p_vt").upper()
+    vq = p2.number_input("Quantity:", min_value=1, value=1, key="p_vq")
+    vp = p3.number_input("Entry Price (₹):", min_value=0.1, value=100.0, key="p_vp")
     
-    if st.button("🚀 Execute Trade"):
+    if st.button("🚀 Add Virtual Trade"):
         if vt:
             st.session_state.portfolio.append({"Ticker": f"{vt}.NS", "Symbol": vt, "Qty": vq, "BuyPrice": vp})
             st.rerun()
@@ -116,13 +119,12 @@ with tab2:
         
         for i in st.session_state.portfolio:
             try:
-                # FIX: Force extraction of raw float value to avoid TypeError
+                # Force float extraction to avoid series/metadata errors
                 if len(p_list) > 1:
                     raw_val = c_data_raw[i['Ticker']].dropna().iloc[-1]
                 else:
                     raw_val = c_data_raw.dropna().iloc[-1]
                 
-                # Convert explicitly to float to strip metadata
                 c_px = float(raw_val)
                 pnl = (c_px - i['BuyPrice']) * i['Qty']
                 total_pnl += pnl
@@ -131,21 +133,48 @@ with tab2:
                     "Qty": i['Qty'], 
                     "Entry": round(float(i['BuyPrice']), 2), 
                     "Current": round(c_px, 2), 
-                    "P&L": round(float(pnl), 2)
+                    "P&L (₹)": round(float(pnl), 2)
                 })
-            except Exception as e:
-                continue
+            except: continue
         
         if p_res:
             st.dataframe(pd.DataFrame(p_res), use_container_width=True, hide_index=True)
-            # The Final Metric fix: Passing clean float to delta
             st.metric("Total Unrealized P&L", f"₹{total_pnl:,.2f}", delta=round(float(total_pnl), 2))
         
-        if st.button("Reset Portfolio"): 
+        if st.button("Reset All Practice Trades"): 
             st.session_state.portfolio = []
             st.rerun()
 
-# --- TAB 3: WATCHLIST ---
+# --- TAB 3: WATCHLIST & LOOKUP (FIXED SYNTAX) ---
 with tab3:
-    st.subheader("🔍 Watchlist")
-    lu = st.
+    st.subheader("🔍 Stock Search & Watchlist")
+    lu_ticker = st.text_input("Deep-Dive Stock (e.g. RELIANCE):", key="w_lu").upper()
+    
+    if lu_ticker:
+        try:
+            with st.spinner(f"Analyzing {lu_ticker}..."):
+                stock_obj = yf.Ticker(f"{lu_ticker}.NS")
+                hist = stock_obj.history(period="1d")
+                if not hist.empty:
+                    current_price = float(hist['Close'].iloc[-1])
+                    st.write(f"**Current Market Price of {lu_ticker}:** ₹{current_price:,.2f}")
+                    
+                    if st.button(f"➕ Add {lu_ticker} to Watchlist"):
+                        if lu_ticker not in st.session_state.watchlist:
+                            st.session_state.watchlist.append(lu_ticker)
+                            st.toast(f"{lu_ticker} Added!")
+                else:
+                    st.error("No data found for this symbol.")
+        except:
+            st.error("Ticker lookup failed. Please use standard NSE names.")
+    
+    st.divider()
+    st.write("**Your Active Watchlist:**")
+    if st.session_state.watchlist:
+        for s in st.session_state.watchlist:
+            st.write(f"🔹 {s}")
+        if st.button("Clear Watchlist"):
+            st.session_state.watchlist = []
+            st.rerun()
+    else:
+        st.write("Your watchlist is empty.")
