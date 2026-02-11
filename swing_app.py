@@ -11,17 +11,18 @@ st.set_page_config(page_title="Elite Swing Terminal", layout="wide")
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
+# Market Hours: 9:15 AM - 3:30 PM
 is_open = (now.weekday() < 5) and (9 <= now.hour < 16)
 if (now.hour == 9 and now.minute < 15) or (now.hour == 15 and now.minute > 30):
     is_open = False
 
 st_autorefresh(interval=15000 if is_open else 60000, key="elite_sync")
 
-# Initialize Virtual Portfolio in Session State
-if 'portfolio' not in st.session_state:
-    st.session_state.portfolio = []
+# Initialize Session States
+if 'portfolio' not in st.session_state: st.session_state.portfolio = []
+if 'watchlist' not in st.session_state: st.session_state.watchlist = []
 
-# --- 2. INDEX HEADER ---
+# --- 2. INDEX HEADER (STAYS VISIBLE) ---
 st.title("🏹 Elite Momentum Terminal")
 indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
 idx_cols = st.columns(len(indices) + 1)
@@ -41,68 +42,111 @@ idx_cols[-1].write(f"**{'🟢 OPEN' if is_open else '⚪ CLOSED'}**")
 idx_cols[-1].write(f"{now.strftime('%H:%M:%S')} IST")
 st.divider()
 
-# --- 3. VIRTUAL PORTFOLIO (PAPER TRADING) ---
-st.subheader("🚀 Virtual Portfolio (Practice Mode)")
-p_col1, p_col2, p_col3, p_col4 = st.columns([2, 1, 1, 1])
+# --- 3. THE TABS ---
+tab1, tab2, tab3 = st.tabs(["📊 Market Scanner", "🚀 Virtual Portfolio", "🎯 Watchlist & Lookup"])
 
-with p_col1: v_ticker = st.text_input("Stock Name:", placeholder="e.g. RELIANCE").upper()
-with p_col2: v_qty = st.number_input("Quantity:", min_value=1, value=1)
-with p_col3: v_price = st.number_input("Entry Price (₹):", min_value=0.1, value=100.0)
-with p_col4: 
-    st.write("##")
-    if st.button("➕ Execute Virtual Order"):
-        if v_ticker:
-            st.session_state.portfolio.append({
-                "Ticker": f"{v_ticker}.NS",
-                "Symbol": v_ticker,
-                "Qty": v_qty,
-                "BuyPrice": v_price,
-                "Date": now.strftime("%Y-%m-%d %H:%M")
-            })
-            st.toast(f"Virtual Order Placed: {v_ticker}")
+# --- TAB 1: MARKET SCANNER ---
+with tab1:
+    st.sidebar.header("🛡️ Strategy Control")
+    cap = st.sidebar.number_input("Capital", value=50000)
+    risk_p = st.sidebar.slider("Risk (%)", 0.5, 5.0, 1.0)
+    
+    NIFTY_50 = ["ADANIENT.NS", "ADANIPORTS.NS", "APOLLOHOSP.NS", "ASIANPAINT.NS", "AXISBANK.NS", "BAJAJ-AUTO.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "BEL.NS", "BPCL.NS", "BHARTIARTL.NS", "BRITANNIA.NS", "CIPLA.NS", "COALINDIA.NS", "DRREDDY.NS", "EICHERMOT.NS", "GRASIM.NS", "HCLTECH.NS", "HDFCBANK.NS", "HDFCLIFE.NS", "HEROMOTOCO.NS", "HINDALCO.NS", "HINDUNILVR.NS", "ICICIBANK.NS", "ITC.NS", "INDUSINDBK.NS", "INFY.NS", "JSWSTEEL.NS", "KOTAKBANK.NS", "LT.NS", "LTIM.NS", "M&M.NS", "MARUTI.NS", "NTPC.NS", "NESTLEIND.NS", "ONGC.NS", "POWERGRID.NS", "RELIANCE.NS", "SBILIFE.NS", "SHRIRAMFIN.NS", "SBIN.NS", "SUNPHARMA.NS", "TCS.NS", "TATACONSUM.NS", "TATAMOTORS.NS", "TATASTEEL.NS", "TECHM.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS"]
 
-if st.session_state.portfolio:
-    portfolio_results = []
-    total_unrealized_pnl = 0.0
-    
-    # Fetch current prices for portfolio
-    p_tickers = [item['Ticker'] for item in st.session_state.portfolio]
-    p_data = yf.download(p_tickers, period="1d", interval="1m", progress=False)['Close']
-    
-    for item in st.session_state.portfolio:
-        try:
-            # Handle both single and multiple ticker dataframe structures
-            if len(p_tickers) > 1:
-                curr_price = p_data[item['Ticker']].dropna().iloc[-1]
-            else:
-                curr_price = p_data.dropna().iloc[-1]
+    @st.cache_data(ttl=30)
+    def get_market_data():
+        h = yf.download(NIFTY_50 + ["^NSEI"], period="1y", interval="1d", progress=False)
+        l = yf.download(NIFTY_50, period="1d", interval="1m", progress=False)
+        return h, l
+
+    try:
+        h_data, l_data = get_market_data()
+        n_perf = (h_data['Close']['^NSEI'].iloc[-1] / h_data['Close']['^NSEI'].iloc[-63]) - 1
+        results = []
+
+        for t in NIFTY_50:
+            try:
+                hc, lc = h_data['Close'][t].dropna(), l_data['Close'][t].dropna()
+                price = float(lc.iloc[-1]) if not lc.empty else float(hc.iloc[-1])
+                dma200 = hc.rolling(200).mean().iloc[-1]
+                delta = hc.diff()
+                rsi = 100 - (100 / (1 + (delta.where(delta > 0, 0).rolling(14).mean() / -delta.where(delta < 0, 0).rolling(14).mean()))).iloc[-1]
+                vol_m = h_data['Volume'][t].iloc[-1] / h_data['Volume'][t].tail(20).mean()
+                rs_b = (hc.iloc[-1] / hc.iloc[-63]) - 1 > n_perf
+
+                is_buy = (price > dma200 and 40 < rsi < 65)
+                stop = float(h_data['Low'][t].tail(20).min()) * 0.985
+                risk_ps = price - stop
+                qty = int((cap * (risk_p / 100)) // risk_ps) if risk_ps > 0 else 0
+                if qty == 0 and cap >= price: qty = 1
                 
-            pnl = (curr_price - item['BuyPrice']) * item['Qty']
-            pnl_pct = ((curr_price - item['BuyPrice']) / item['BuyPrice']) * 100
-            total_unrealized_pnl += pnl
-            
-            portfolio_results.append({
-                "Stock": item['Symbol'],
-                "Qty": item['Qty'],
-                "Buy Price": f"₹{item['BuyPrice']:,.2f}",
-                "Current": f"₹{curr_price:,.2f}",
-                "P&L (₹)": round(pnl, 2),
-                "Change %": f"{pnl_pct:+.2f}%",
-                "Value": f"₹{curr_price * item['Qty']:,.2f}"
-            })
-        except: continue
+                results.append({
+                    "Stock": t.replace(".NS", ""),
+                    "Action": "✅ BUY" if is_buy else "⏳ WAIT",
+                    "Price": round(price, 2),
+                    "StopLoss": round(stop, 2),
+                    "Profit": round(qty * (risk_ps * 2), 2),
+                    "RSI": round(rsi, 1),
+                    "Vol": f"{vol_m:.1f}x",
+                    "Leader": "Yes" if rs_b else "No"
+                })
+            except: continue
+
+        df = pd.DataFrame(results)
+        df['s'] = df['Action'].apply(lambda x: 0 if "BUY" in x else 1)
+        df = df.sort_values('s').drop(columns=['s'])
+        st.dataframe(df, use_container_width=True, hide_index=True, height=500)
+    except: st.info("Scanning Market...")
+
+# --- TAB 2: VIRTUAL PORTFOLIO ---
+with tab2:
+    st.subheader("🚀 Virtual Portfolio Tracker")
+    p_col1, p_col2, p_col3 = st.columns(3)
+    with p_col1: vt = st.text_input("Stock Symbol:", key="vt").upper()
+    with p_col2: vq = st.number_input("Qty:", min_value=1, value=1)
+    with p_col3: vp = st.number_input("Buy Price (₹):", min_value=0.1, value=100.0)
     
-    st.dataframe(pd.DataFrame(portfolio_results), use_container_width=True, hide_index=True)
+    if st.button("🚀 Add Virtual Trade"):
+        if vt:
+            st.session_state.portfolio.append({"Ticker": f"{vt}.NS", "Symbol": vt, "Qty": vq, "BuyPrice": vp})
+            st.rerun()
+
+    if st.session_state.portfolio:
+        p_res = []
+        total_pnl = 0.0
+        p_list = [i['Ticker'] for i in st.session_state.portfolio]
+        curr_p_data = yf.download(p_list, period="1d", interval="1m", progress=False)['Close']
+        
+        for i in st.session_state.portfolio:
+            try:
+                c_px = curr_p_data[i['Ticker']].dropna().iloc[-1] if len(p_list)>1 else curr_p_data.dropna().iloc[-1]
+                pnl = (c_px - i['BuyPrice']) * i['Qty']
+                total_pnl += pnl
+                p_res.append({"Stock": i['Symbol'], "Qty": i['Qty'], "Entry": i['BuyPrice'], "Current": round(c_px, 2), "P&L": round(pnl, 2)})
+            except: continue
+        
+        st.table(pd.DataFrame(p_res))
+        st.metric("Total P&L", f"₹{total_pnl:,.2f}", delta=f"{total_pnl:,.2f}")
+        if st.button("Reset Portfolio"): 
+            st.session_state.portfolio = []
+            st.rerun()
+
+# --- TAB 3: WATCHLIST & LOOKUP ---
+with tab3:
+    st.subheader("🔍 Deep-Dive & Watchlist")
+    lookup = st.text_input("Deep-Dive Stock (e.g. HAL, ITC):").upper()
+    if lookup:
+        # Simplified lookup logic
+        try:
+            d_px = yf.Ticker(f"{lookup}.NS").history(period="1d")['Close'].iloc[-1]
+            st.write(f"**Current Price of {lookup}:** ₹{d_px:,.2f}")
+            if st.button(f"Add {lookup} to Watchlist"):
+                if lookup not in st.session_state.watchlist: st.session_state.watchlist.append(lookup)
+        except: st.error("Ticker not found.")
     
-    # Summary Metrics
-    s_col1, s_col2 = st.columns(2)
-    pnl_color = "normal" if total_unrealized_pnl >= 0 else "inverse"
-    s_col1.metric("Total Unrealized P&L", f"₹{total_unrealized_pnl:,.2f}", delta=f"{total_unrealized_pnl:,.2f}", delta_color=pnl_color)
-    if st.button("Clear Portfolio"):
-        st.session_state.portfolio = []
+    st.divider()
+    st.write("**Your Watchlist:**")
+    for s in st.session_state.watchlist: st.write(f"🔹 {s}")
+    if st.button("Clear Watchlist"):
+        st.session_state.watchlist = []
         st.rerun()
-
-st.divider()
-
-# --- 4. DATA ENGINE & MAIN SCANNER ---
-# (Rest of the Nifty 50 logic remains the same below for your reference)
