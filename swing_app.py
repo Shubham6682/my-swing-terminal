@@ -3,24 +3,29 @@ import yfinance as yf
 import pandas as pd
 import datetime
 import pytz
+import os
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="Elite Swing Terminal", layout="wide")
+PORTFOLIO_FILE = "virtual_portfolio.csv"
 
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
-# Market Hours: 9:15 AM - 3:30 PM IST
 is_open = (now.weekday() < 5) and (9 <= now.hour < 16)
 if (now.hour == 9 and now.minute < 15) or (now.hour == 15 and now.minute > 30):
     is_open = False
 
-# Auto-refresh every 15s during market, 60s otherwise
 st_autorefresh(interval=15000 if is_open else 60000, key="elite_sync")
 
 # Initialize Session States
-if 'portfolio' not in st.session_state: st.session_state.portfolio = []
+if 'portfolio' not in st.session_state:
+    if os.path.exists(PORTFOLIO_FILE):
+        st.session_state.portfolio = pd.read_csv(PORTFOLIO_FILE).to_dict('records')
+    else:
+        st.session_state.portfolio = []
+
 if 'watchlist' not in st.session_state: st.session_state.watchlist = []
 
 # --- 2. INDEX HEADER ---
@@ -51,6 +56,12 @@ with st.sidebar:
     st.header("🛡️ Strategy Control")
     cap = st.number_input("Total Capital (₹)", value=50000)
     risk_p = st.slider("Risk per Trade (%)", 0.5, 5.0, 1.0)
+    
+    st.divider()
+    st.header("💾 Persistence")
+    if st.button("💾 Save Portfolio Now"):
+        pd.DataFrame(st.session_state.portfolio).to_csv(PORTFOLIO_FILE, index=False)
+        st.success("Portfolio Saved Locally!")
 
 # --- 4. TABS ---
 tab1, tab2, tab3 = st.tabs(["📊 Market Scanner", "🚀 Virtual Portfolio", "🎯 Watchlist & Lookup"])
@@ -116,15 +127,16 @@ with tab1:
 
 # --- TAB 2: PORTFOLIO ---
 with tab2:
-    st.subheader("🚀 Practice Portfolio")
+    st.subheader("🚀 Virtual Portfolio Tracker")
     c1, c2, c3 = st.columns(3)
-    p_vt = c1.text_input("Stock Symbol:", key="p_vt_main").upper()
-    p_vq = c2.number_input("Qty:", min_value=1, value=1, key="p_vq_main")
-    p_vp = c3.number_input("Price (₹):", min_value=0.1, value=100.0, key="p_vp_main")
+    p_vt = c1.text_input("Stock Symbol:", key="save_vt").upper()
+    p_vq = c2.number_input("Qty:", min_value=1, value=1, key="save_vq")
+    p_vp = c3.number_input("Price (₹):", min_value=0.1, value=100.0, key="save_vp")
     
-    if st.button("🚀 Add Virtual Trade", key="add_v_btn"):
+    if st.button("🚀 Add Trade & Save"):
         if p_vt:
             st.session_state.portfolio.append({"Ticker": f"{p_vt}.NS", "Symbol": p_vt, "Qty": p_vq, "BuyPrice": p_vp})
+            pd.DataFrame(st.session_state.portfolio).to_csv(PORTFOLIO_FILE, index=False)
             st.rerun()
 
     if st.session_state.portfolio:
@@ -142,19 +154,22 @@ with tab2:
             except: continue
         st.dataframe(pd.DataFrame(p_res), use_container_width=True, hide_index=True)
         st.metric("Total Unrealized P&L", f"₹{total_pnl:,.2f}", delta=round(float(total_pnl), 2))
-        if st.button("Reset Portfolio", key="reset_v_btn"): st.session_state.portfolio = []; st.rerun()
+        if st.button("Delete All & Clear File"):
+            if os.path.exists(PORTFOLIO_FILE): os.remove(PORTFOLIO_FILE)
+            st.session_state.portfolio = []
+            st.rerun()
 
 # --- TAB 3: WATCHLIST ---
 with tab3:
     st.subheader("🔍 Market Search")
-    lu = st.text_input("Search Ticker:", key="lu_main").upper()
+    lu = st.text_input("Enter Ticker:", key="save_lu").upper()
     if lu:
         try:
             px = float(yf.Ticker(f"{lu}.NS").history(period="1d")['Close'].iloc[-1])
             st.write(f"**Current Price:** ₹{px:,.2f}")
-            if st.button(f"Add {lu} to Watchlist", key="add_w_btn"):
+            if st.button(f"Add {lu}"):
                 if lu not in st.session_state.watchlist: st.session_state.watchlist.append(lu)
         except: st.error("Lookup failed.")
     st.divider()
     for s in st.session_state.watchlist: st.write(f"🔹 {s}")
-    if st.button("Clear Watchlist", key="clear_w_btn"): st.session_state.watchlist = []; st.rerun()
+    if st.button("Clear Watchlist"): st.session_state.watchlist = []; st.rerun()
