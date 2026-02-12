@@ -13,11 +13,10 @@ PORTFOLIO_FILE = "virtual_portfolio.csv"
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
-# Market Hours check
 is_open = (now.weekday() < 5) and (9 <= now.hour < 16)
-st_autorefresh(interval=15000 if is_open else 60000, key="pro_view_sync")
+st_autorefresh(interval=15000 if is_open else 60000, key="safe_entry_sync")
 
-# --- 2. DATA PERSISTENCE & SELF-HEALING ---
+# --- 2. DATA PERSISTENCE ---
 if 'portfolio' not in st.session_state:
     if os.path.exists(PORTFOLIO_FILE):
         df_load = pd.read_csv(PORTFOLIO_FILE)
@@ -27,19 +26,7 @@ if 'portfolio' not in st.session_state:
 
 if 'triggers' not in st.session_state: st.session_state.triggers = {}
 
-# --- 3. SIDEBAR (RESTORED VIEW OPTIONS) ---
-with st.sidebar:
-    st.header("⚙️ Terminal Settings")
-    view_mode = st.radio("Display Mode", ["Simple View", "Pro Deep-Dive"])
-    st.divider()
-    st.header("🛡️ Risk Control")
-    cap = st.number_input("Total Capital (₹)", value=50000)
-    risk_p = st.slider("Risk per Trade (%)", 0.5, 3.0, 1.0)
-    if st.button("💾 Save Portfolio"):
-        pd.DataFrame(st.session_state.portfolio).to_csv(PORTFOLIO_FILE, index=False)
-        st.success("Data Saved!")
-
-# --- 4. HEADER ---
+# --- 3. HEADER & INDICES ---
 st.title("🏹 Elite Pro Momentum Terminal")
 indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
 idx_cols = st.columns(len(indices) + 1)
@@ -52,14 +39,25 @@ for i, (name, ticker) in enumerate(indices.items()):
 idx_cols[-1].write(f"**{'🟢 OPEN' if is_open else '⚪ CLOSED'}**\n{now.strftime('%H:%M:%S')}")
 st.divider()
 
-# --- 5. TABS ---
+# --- 4. FULL NIFTY 50 LIST ---
+NIFTY_50 = ["ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK", "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BEL", "BPCL", "BHARTIARTL", "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "ITC", "INDUSINDBK", "INFY", "JSWSTEEL", "KOTAKBANK", "LT", "LTIM", "M&M", "MARUTI", "NTPC", "NESTLEIND", "ONGC", "POWERGRID", "RELIANCE", "SBILIFE", "SHRIRAMFIN", "SBIN", "SUNPHARMA", "TCS", "TATACONSUM", "TATAMOTORS", "TATASTEEL", "TECHM", "TITAN", "ULTRACEMCO", "WIPRO"]
+TICKERS_NS = [f"{t}.NS" for t in NIFTY_50]
+
+# --- 5. SIDEBAR ---
+with st.sidebar:
+    st.header("⚙️ View Options")
+    view_mode = st.radio("Display Mode", ["Simple View", "Risk Analysis"])
+    st.divider()
+    st.header("🛡️ Risk Control")
+    cap = st.number_input("Capital (₹)", value=50000)
+    risk_p = st.slider("Max Risk per Trade (%)", 0.5, 3.0, 1.0)
+    st.info(f"Stop Loss will be set at {risk_p}% below entry.")
+
+# --- 6. TABS ---
 tab1, tab2 = st.tabs(["📊 Market Scanner", "🚀 Virtual Portfolio"])
 
 # --- TAB 1: SCANNER ---
 with tab1:
-    NIFTY_50 = ["ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK", "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BEL", "BPCL", "BHARTIARTL", "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "ITC", "INDUSINDBK", "INFY", "JSWSTEEL", "KOTAKBANK", "LT", "LTIM", "M&M", "MARUTI", "NTPC", "NESTLEIND", "ONGC", "POWERGRID", "RELIANCE", "SBILIFE", "SHRIRAMFIN", "SBIN", "SUNPHARMA", "TCS", "TATACONSUM", "TATAMOTORS", "TATASTEEL", "TECHM", "TITAN", "ULTRACEMCO", "WIPRO"]
-    TICKERS_NS = [f"{t}.NS" for t in NIFTY_50]
-
     @st.cache_data(ttl=30)
     def fetch_market():
         h = yf.download(TICKERS_NS + ["^NSEI"], period="1y", progress=False)
@@ -78,7 +76,7 @@ with tab1:
             high_5d = hc.tail(5).max()
             trigger = round(high_5d * 1.002, 2)
             
-            # Leader Check
+            # Leader Check (vs Nifty)
             n_h = h_data['Close']['^NSEI'].dropna()
             is_leader = (hc.iloc[-1]/hc.iloc[-63]) > (n_h.iloc[-1]/n_h.iloc[-63])
             
@@ -95,23 +93,28 @@ with tab1:
                     entry_type = "BUY NEAR"
                     trigger = round(ema20, 2)
             
+            # Risk Analysis Logic
+            gap_pct = ((price - trigger) / trigger) * 100
+            
             res = {
                 "Stock": t.replace(".NS",""), 
                 "Status": status, 
-                "Type": entry_type if view_mode == "Pro Deep-Dive" else None,
                 "Entry Zone": trigger, 
-                "LTP": round(price, 2),
-                "StopLoss": round(hc.tail(20).min() * 0.985, 2),
-                "Leader": "✅" if is_leader else "❌" if view_mode == "Pro Deep-Dive" else None
+                "LTP": round(price, 2)
             }
-            # Remove None values for cleaner table
-            results.append({k: v for k, v in res.items() if v is not None})
+            
+            if view_mode == "Risk Analysis":
+                res["Gap %"] = f"{gap_pct:+.2f}%"
+                res["Risk Info"] = "🟢 SAFE" if gap_pct < 1.5 else "🟡 CHASING" if gap_pct < 3 else "🔴 TOO FAR"
+                res["StopLoss"] = round(price * (1 - (risk_p/100)), 2)
+            
+            results.append(res)
         except: continue
     
-    df_final = pd.DataFrame(results)
-    st.dataframe(df_final.sort_values("Status"), use_container_width=True, hide_index=True)
+    df_res = pd.DataFrame(results)
+    st.dataframe(df_res.sort_values("Status"), use_container_width=True, hide_index=True)
 
-# --- TAB 2: PORTFOLIO (WITH ADD BUTTONS) ---
+# --- TAB 2: PORTFOLIO ---
 with tab2:
     if st.session_state.portfolio:
         p_list = [i['Ticker'] for i in st.session_state.portfolio]
@@ -120,7 +123,6 @@ with tab2:
         for i in st.session_state.portfolio:
             try:
                 cv = float(c_pxs[i['Ticker']].dropna().iloc[-1]) if len(p_list)>1 else float(c_pxs.dropna().iloc[-1])
-                # Auto Trailing
                 if cv > (i['BuyPrice'] * 1.03) and i['StopPrice'] < i['BuyPrice']:
                     i['StopPrice'] = i['BuyPrice']
                     st.toast(f"🛡️ {i['Symbol']} moved to Break-even!")
@@ -129,12 +131,12 @@ with tab2:
             except: continue
         st.dataframe(pd.DataFrame(display_p), use_container_width=True, hide_index=True)
 
-    with st.expander("➕ Execute Manual Entry"):
+    with st.expander("➕ Execute Entry"):
         col1, col2, col3 = st.columns(3)
         nt = col1.selectbox("Stock", TICKERS_NS)
         nq = col2.number_input("Qty", min_value=1, value=1)
         np = col3.number_input("Price", min_value=1.0)
         if st.button("Add to Portfolio"):
-            st.session_state.portfolio.append({"Ticker": nt, "Symbol": nt.replace(".NS",""), "Qty": nq, "BuyPrice": np, "StopPrice": np * 0.98})
+            st.session_state.portfolio.append({"Ticker": nt, "Symbol": nt.replace(".NS",""), "Qty": nq, "BuyPrice": np, "StopPrice": np * (1 - (risk_p/100))})
             pd.DataFrame(st.session_state.portfolio).to_csv(PORTFOLIO_FILE, index=False)
             st.rerun()
