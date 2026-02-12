@@ -64,7 +64,7 @@ with st.sidebar:
 # --- 4. TABS ---
 tab1, tab2, tab3 = st.tabs(["📊 Market Scanner", "🚀 Virtual Portfolio", "🎯 Watchlist & Lookup"])
 
-# --- TAB 1: SCANNER (WITH OBSERVATION ENGINE) ---
+# --- TAB 1: SCANNER ---
 with tab1:
     NIFTY_50 = ["ADANIENT.NS", "ADANIPORTS.NS", "APOLLOHOSP.NS", "ASIANPAINT.NS", "AXISBANK.NS", "BAJAJ-AUTO.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "BEL.NS", "BPCL.NS", "BHARTIARTL.NS", "BRITANNIA.NS", "CIPLA.NS", "COALINDIA.NS", "DRREDDY.NS", "EICHERMOT.NS", "GRASIM.NS", "HCLTECH.NS", "HDFCBANK.NS", "HDFCLIFE.NS", "HEROMOTOCO.NS", "HINDALCO.NS", "HINDUNILVR.NS", "ICICIBANK.NS", "ITC.NS", "INDUSINDBK.NS", "INFY.NS", "JSWSTEEL.NS", "KOTAKBANK.NS", "LT.NS", "LTIM.NS", "M&M.NS", "MARUTI.NS", "NTPC.NS", "NESTLEIND.NS", "ONGC.NS", "POWERGRID.NS", "RELIANCE.NS", "SBILIFE.NS", "SHRIRAMFIN.NS", "SBIN.NS", "SUNPHARMA.NS", "TCS.NS", "TATACONSUM.NS", "TATAMOTORS.NS", "TATASTEEL.NS", "TECHM.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS"]
 
@@ -100,9 +100,7 @@ with tab1:
                 if is_uptrend and is_breakout_mode and price >= trigger_price:
                     if stock_key not in st.session_state.triggers:
                         st.session_state.triggers[stock_key] = time.time()
-                    
                     elapsed = (time.time() - st.session_state.triggers[stock_key]) / 60
-                    
                     if elapsed >= 15:
                         if last_15m_close >= trigger_price and price >= buffer_price:
                             status, strategy = "🎯 CONFIRMED BUY", "Verified Breakout"
@@ -115,12 +113,7 @@ with tab1:
                     status, strategy = "⏳ WAIT", f"Pullback to ₹{ema20:.1f}"
                 
                 stop = float(h_data['Low'][t].tail(20).min()) * 0.985
-                risk_ps = price - stop
-                qty = int((cap * (risk_p / 100)) // risk_ps) if risk_ps > 0 else 1
-                
-                res = {"Stock": stock_key, "Status": status, "Strategy": strategy, "Price": round(price, 2), "StopLoss": round(stop, 2), "Profit": round(qty * (risk_ps * 2), 2)}
-                if view_mode == "Pro (Deep-Dive)":
-                    res["RSI"], res["Vol"] = round(rsi, 1), f"{h_data['Volume'][t].iloc[-1] / h_data['Volume'][t].tail(20).mean():.1f}x"
+                res = {"Stock": stock_key, "Status": status, "Strategy": strategy, "Price": round(price, 2), "StopLoss": round(stop, 2)}
                 results.append(res)
             except: continue
         
@@ -129,17 +122,21 @@ with tab1:
         st.dataframe(df.sort_values('sort').drop(columns=['sort']), use_container_width=True, hide_index=True, height=500)
     except: st.info("Scanning...")
 
-# --- TAB 2: PORTFOLIO (RESTORED) ---
+# --- TAB 2: PORTFOLIO (WITH ALERT LOGIC) ---
 with tab2:
-    st.subheader("🚀 Virtual Portfolio")
-    c1, c2, c3 = st.columns(3)
+    st.subheader("🚀 Virtual Portfolio & Active Alerts")
+    c1, c2, c3, c4 = st.columns(4)
     p_vt = c1.text_input("Symbol:", key="v_vt_p").upper()
     p_vq = c2.number_input("Qty:", min_value=1, value=1, key="v_vq_p")
-    p_vp = c3.number_input("Entry Price:", min_value=0.1, value=100.0, key="v_vp_p")
+    p_vp = c3.number_input("Entry (₹):", min_value=0.1, value=100.0, key="v_vp_p")
+    p_sl = c4.number_input("Stop Loss (₹):", min_value=0.1, value=90.0, key="v_sl_p")
     
-    if st.button("🚀 Add & Save Trade"):
+    if st.button("🚀 Execute & Save Trade"):
         if p_vt:
-            st.session_state.portfolio.append({"Ticker": f"{p_vt}.NS", "Symbol": p_vt, "Qty": p_vq, "BuyPrice": p_vp})
+            st.session_state.portfolio.append({
+                "Ticker": f"{p_vt}.NS", "Symbol": p_vt, 
+                "Qty": p_vq, "BuyPrice": p_vp, "StopPrice": p_sl
+            })
             pd.DataFrame(st.session_state.portfolio).to_csv(PORTFOLIO_FILE, index=False)
             st.rerun()
 
@@ -148,22 +145,35 @@ with tab2:
         total_pnl = 0.0
         p_list = list(set([i['Ticker'] for i in st.session_state.portfolio]))
         c_raw = yf.download(p_list, period="1d", interval="1m", progress=False)['Close']
+        
         for i in st.session_state.portfolio:
             try:
                 raw_v = c_raw[i['Ticker']].dropna().iloc[-1] if len(p_list) > 1 else c_raw.dropna().iloc[-1]
                 c_px = float(raw_v)
+                
+                # --- ALERT LOGIC ---
+                if c_px <= i['StopPrice']:
+                    st.toast(f"🚨 STOP LOSS HIT: {i['Symbol']} at ₹{c_px}", icon="⚠️")
+                    # Play a short alert chime
+                    st.audio("https://www.soundjay.com/buttons/beep-01a.mp3", autoplay=True)
+                
                 pnl = (c_px - i['BuyPrice']) * i['Qty']
                 total_pnl += pnl
-                p_res.append({"Stock": i['Symbol'], "Qty": i['Qty'], "Entry": round(float(i['BuyPrice']), 2), "Current": round(c_px, 2), "P&L": round(float(pnl), 2)})
+                p_res.append({
+                    "Stock": i['Symbol'], "Qty": i['Qty'], 
+                    "Entry": round(float(i['BuyPrice']), 2), 
+                    "StopLoss": round(float(i['StopPrice']), 2),
+                    "Current": round(c_px, 2), "P&L": round(float(pnl), 2)
+                })
             except: continue
         st.dataframe(pd.DataFrame(p_res), use_container_width=True, hide_index=True)
         st.metric("Total P&L", f"₹{total_pnl:,.2f}", delta=round(float(total_pnl), 2))
-        if st.button("Reset All Trades"):
+        if st.button("Reset Portfolio"):
             if os.path.exists(PORTFOLIO_FILE): os.remove(PORTFOLIO_FILE)
             st.session_state.portfolio = []
             st.rerun()
 
-# --- TAB 3: WATCHLIST (RESTORED) ---
+# --- TAB 3: WATCHLIST ---
 with tab3:
     st.subheader("🔍 Market Search")
     lu = st.text_input("Enter Ticker:", key="v_lu_w").upper()
@@ -176,4 +186,3 @@ with tab3:
         except: st.error("Lookup failed.")
     st.divider()
     for s in st.session_state.watchlist: st.write(f"🔹 {s}")
-    if st.button("Clear Watchlist"): st.session_state.watchlist = []; st.rerun()
