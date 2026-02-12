@@ -13,6 +13,7 @@ PORTFOLIO_FILE = "virtual_portfolio.csv"
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
+# Market Hours: 9:15 AM - 3:30 PM
 is_open = (now.weekday() < 5) and (9 <= now.hour < 16)
 if (now.hour == 9 and now.minute < 15) or (now.hour == 15 and now.minute > 30):
     is_open = False
@@ -28,21 +29,28 @@ if 'portfolio' not in st.session_state:
 
 if 'watchlist' not in st.session_state: st.session_state.watchlist = []
 
-# --- 2. INDEX HEADER ---
+# --- 2. INDEX HEADER (RESTORED SENSEX) ---
 st.title("🏹 Elite Momentum Terminal")
-indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
+indices = {
+    "Nifty 50": "^NSEI", 
+    "Sensex": "^BSESN",    # RESTORED
+    "Bank Nifty": "^NSEBANK"
+}
 idx_cols = st.columns(len(indices) + 1)
 
 for i, (name, ticker) in enumerate(indices.items()):
     try:
         t_obj = yf.Ticker(ticker)
-        df_live = t_obj.history(period="1d", interval="1m")
+        # Fetching 2 days of data to compare current price with yesterday's close
         df_hist = t_obj.history(period="2d")
-        if not df_live.empty and not df_hist.empty:
-            curr, prev = df_live['Close'].iloc[-1], df_hist['Close'].iloc[0]
+        if len(df_hist) >= 2:
+            curr = df_hist['Close'].iloc[-1]
+            prev = df_hist['Close'].iloc[-2]
             change = curr - prev
-            idx_cols[i].metric(name, f"{curr:,.2f}", f"{change:+.2f} ({(change/prev)*100:+.2f}%)")
-    except: idx_cols[i].metric(name, "N/A")
+            pct = (change / prev) * 100
+            idx_cols[i].metric(name, f"{curr:,.2f}", f"{change:+.2f} ({pct:+.2f}%)")
+    except:
+        idx_cols[i].metric(name, "N/A")
 
 idx_cols[-1].write(f"**{'🟢 OPEN' if is_open else '⚪ CLOSED'}**")
 idx_cols[-1].write(f"{now.strftime('%H:%M:%S')} IST")
@@ -56,12 +64,10 @@ with st.sidebar:
     st.header("🛡️ Strategy Control")
     cap = st.number_input("Total Capital (₹)", value=50000)
     risk_p = st.slider("Risk per Trade (%)", 0.5, 5.0, 1.0)
-    
     st.divider()
-    st.header("💾 Persistence")
     if st.button("💾 Save Portfolio Now"):
         pd.DataFrame(st.session_state.portfolio).to_csv(PORTFOLIO_FILE, index=False)
-        st.success("Portfolio Saved Locally!")
+        st.success("Portfolio Saved!")
 
 # --- 4. TABS ---
 tab1, tab2, tab3 = st.tabs(["📊 Market Scanner", "🚀 Virtual Portfolio", "🎯 Watchlist & Lookup"])
@@ -123,17 +129,17 @@ with tab1:
         df = pd.DataFrame(results)
         df['sort'] = df['Status'].map({"🎯 CONFIRMED BUY": 0, "⚡ TRIGGERED": 1, "⏳ WAIT": 2})
         st.dataframe(df.sort_values('sort').drop(columns=['sort']), use_container_width=True, hide_index=True, height=500)
-    except: st.info("Scanning...")
+    except: st.info("Scanning for morning breakouts...")
 
 # --- TAB 2: PORTFOLIO ---
 with tab2:
-    st.subheader("🚀 Virtual Portfolio Tracker")
+    st.subheader("🚀 Virtual Portfolio")
     c1, c2, c3 = st.columns(3)
-    p_vt = c1.text_input("Stock Symbol:", key="save_vt").upper()
-    p_vq = c2.number_input("Qty:", min_value=1, value=1, key="save_vq")
-    p_vp = c3.number_input("Price (₹):", min_value=0.1, value=100.0, key="save_vp")
+    p_vt = c1.text_input("Symbol:", key="v_vt").upper()
+    p_vq = c2.number_input("Qty:", min_value=1, value=1, key="v_vq")
+    p_vp = c3.number_input("Entry Price:", min_value=0.1, value=100.0, key="v_vp")
     
-    if st.button("🚀 Add Trade & Save"):
+    if st.button("🚀 Add & Save Trade"):
         if p_vt:
             st.session_state.portfolio.append({"Ticker": f"{p_vt}.NS", "Symbol": p_vt, "Qty": p_vq, "BuyPrice": p_vp})
             pd.DataFrame(st.session_state.portfolio).to_csv(PORTFOLIO_FILE, index=False)
@@ -153,8 +159,8 @@ with tab2:
                 p_res.append({"Stock": i['Symbol'], "Qty": i['Qty'], "Entry": round(float(i['BuyPrice']), 2), "Current": round(c_px, 2), "P&L": round(float(pnl), 2)})
             except: continue
         st.dataframe(pd.DataFrame(p_res), use_container_width=True, hide_index=True)
-        st.metric("Total Unrealized P&L", f"₹{total_pnl:,.2f}", delta=round(float(total_pnl), 2))
-        if st.button("Delete All & Clear File"):
+        st.metric("Total P&L", f"₹{total_pnl:,.2f}", delta=round(float(total_pnl), 2))
+        if st.button("Reset All"):
             if os.path.exists(PORTFOLIO_FILE): os.remove(PORTFOLIO_FILE)
             st.session_state.portfolio = []
             st.rerun()
@@ -162,11 +168,11 @@ with tab2:
 # --- TAB 3: WATCHLIST ---
 with tab3:
     st.subheader("🔍 Market Search")
-    lu = st.text_input("Enter Ticker:", key="save_lu").upper()
+    lu = st.text_input("Enter Ticker:", key="v_lu").upper()
     if lu:
         try:
             px = float(yf.Ticker(f"{lu}.NS").history(period="1d")['Close'].iloc[-1])
-            st.write(f"**Current Price:** ₹{px:,.2f}")
+            st.write(f"**Price:** ₹{px:,.2f}")
             if st.button(f"Add {lu}"):
                 if lu not in st.session_state.watchlist: st.session_state.watchlist.append(lu)
         except: st.error("Lookup failed.")
