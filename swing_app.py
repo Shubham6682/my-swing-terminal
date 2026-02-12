@@ -11,6 +11,9 @@ from streamlit_autorefresh import st_autorefresh
 st.set_page_config(page_title="Elite Swing Terminal", layout="wide")
 PORTFOLIO_FILE = "virtual_portfolio.csv"
 
+# Nifty 50 List for the Search Dropdown
+NIFTY_50_TICKERS = ["ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK", "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BEL", "BPCL", "BHARTIARTL", "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "ITC", "INDUSINDBK", "INFY", "JSWSTEEL", "KOTAKBANK", "LT", "LTIM", "M&M", "MARUTI", "NTPC", "NESTLEIND", "ONGC", "POWERGRID", "RELIANCE", "SBILIFE", "SHRIRAMFIN", "SBIN", "SUNPHARMA", "TCS", "TATACONSUM", "TATAMOTORS", "TATASTEEL", "TECHM", "TITAN", "ULTRACEMCO", "WIPRO"]
+
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
@@ -66,19 +69,18 @@ tab1, tab2, tab3 = st.tabs(["📊 Market Scanner", "🚀 Virtual Portfolio", "�
 
 # --- TAB 1: SCANNER ---
 with tab1:
-    NIFTY_50 = ["ADANIENT.NS", "ADANIPORTS.NS", "APOLLOHOSP.NS", "ASIANPAINT.NS", "AXISBANK.NS", "BAJAJ-AUTO.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "BEL.NS", "BPCL.NS", "BHARTIARTL.NS", "BRITANNIA.NS", "CIPLA.NS", "COALINDIA.NS", "DRREDDY.NS", "EICHERMOT.NS", "GRASIM.NS", "HCLTECH.NS", "HDFCBANK.NS", "HDFCLIFE.NS", "HEROMOTOCO.NS", "HINDALCO.NS", "HINDUNILVR.NS", "ICICIBANK.NS", "ITC.NS", "INDUSINDBK.NS", "INFY.NS", "JSWSTEEL.NS", "KOTAKBANK.NS", "LT.NS", "LTIM.NS", "M&M.NS", "MARUTI.NS", "NTPC.NS", "NESTLEIND.NS", "ONGC.NS", "POWERGRID.NS", "RELIANCE.NS", "SBILIFE.NS", "SHRIRAMFIN.NS", "SBIN.NS", "SUNPHARMA.NS", "TCS.NS", "TATACONSUM.NS", "TATAMOTORS.NS", "TATASTEEL.NS", "TECHM.NS", "TITAN.NS", "ULTRACEMCO.NS", "WIPRO.NS"]
-
+    NIFTY_50_FULL = [f"{t}.NS" for t in NIFTY_50_TICKERS]
     @st.cache_data(ttl=30)
     def get_market_data():
-        h = yf.download(NIFTY_50 + ["^NSEI"], period="1y", interval="1d", progress=False)
-        l_15m = yf.download(NIFTY_50, period="2d", interval="15m", progress=False)
-        l_1m = yf.download(NIFTY_50, period="1d", interval="1m", progress=False)
+        h = yf.download(NIFTY_50_FULL + ["^NSEI"], period="1y", interval="1d", progress=False)
+        l_15m = yf.download(NIFTY_50_FULL, period="2d", interval="15m", progress=False)
+        l_1m = yf.download(NIFTY_50_FULL, period="1d", interval="1m", progress=False)
         return h, l_15m, l_1m
 
     try:
         h_data, l_15m_data, l_1m_data = get_market_data()
         results = []
-        for t in NIFTY_50:
+        for t in NIFTY_50_FULL:
             try:
                 hc, lc_15m, lc_1m = h_data['Close'][t].dropna(), l_15m_data['Close'][t].dropna(), l_1m_data['Close'][t].dropna()
                 price, last_15m_close = float(lc_1m.iloc[-1]), float(lc_15m.iloc[-1])
@@ -91,8 +93,7 @@ with tab1:
                 delta = hc.diff()
                 rsi = 100 - (100 / (1 + (delta.where(delta > 0, 0).rolling(14).mean() / -delta.where(delta < 0, 0).rolling(14).mean()))).iloc[-1]
                 
-                is_uptrend = price > dma200
-                is_breakout_mode = 40 <= rsi <= 60
+                is_uptrend, is_breakout_mode = price > dma200, 40 <= rsi <= 60
                 stock_key = t.replace(".NS", "")
                 
                 status, strategy = "⏳ WAIT", f"Breakout @ ₹{trigger_price}"
@@ -112,33 +113,32 @@ with tab1:
                 elif rsi > 60:
                     status, strategy = "⏳ WAIT", f"Pullback to ₹{ema20:.1f}"
                 
-                stop = float(h_data['Low'][t].tail(20).min()) * 0.985
-                res = {"Stock": stock_key, "Status": status, "Strategy": strategy, "Price": round(price, 2), "StopLoss": round(stop, 2)}
+                res = {"Stock": stock_key, "Status": status, "Strategy": strategy, "Price": round(price, 2), "StopLoss": round(float(hc.tail(20).min() * 0.985), 2)}
                 results.append(res)
             except: continue
-        
         df = pd.DataFrame(results)
         df['sort'] = df['Status'].map({"🎯 CONFIRMED BUY": 0, "👀 OBSERVING": 1, "⏳ WAIT": 2, "❌ FAILED BREAKOUT": 3})
         st.dataframe(df.sort_values('sort').drop(columns=['sort']), use_container_width=True, hide_index=True, height=500)
     except: st.info("Scanning...")
 
-# --- TAB 2: PORTFOLIO (WITH ALERT LOGIC) ---
+# --- TAB 2: PORTFOLIO (WITH SMART DROPDOWN) ---
 with tab2:
-    st.subheader("🚀 Virtual Portfolio & Active Alerts")
+    st.subheader("🚀 Virtual Portfolio")
     c1, c2, c3, c4 = st.columns(4)
-    p_vt = c1.text_input("Symbol:", key="v_vt_p").upper()
-    p_vq = c2.number_input("Qty:", min_value=1, value=1, key="v_vq_p")
-    p_vp = c3.number_input("Entry (₹):", min_value=0.1, value=100.0, key="v_vp_p")
-    p_sl = c4.number_input("Stop Loss (₹):", min_value=0.1, value=90.0, key="v_sl_p")
+    
+    # NEW: Dropdown Search Menu
+    p_vt = c1.selectbox("Search Stock Name:", options=NIFTY_50_TICKERS, help="Select a stock from the Nifty 50 list.")
+    p_vq = c2.number_input("Qty:", min_value=1, value=1)
+    p_vp = c3.number_input("Entry Price (₹):", min_value=0.1, value=100.0)
+    p_sl = c4.number_input("Stop Loss (₹):", min_value=0.1, value=90.0)
     
     if st.button("🚀 Execute & Save Trade"):
-        if p_vt:
-            st.session_state.portfolio.append({
-                "Ticker": f"{p_vt}.NS", "Symbol": p_vt, 
-                "Qty": p_vq, "BuyPrice": p_vp, "StopPrice": p_sl
-            })
-            pd.DataFrame(st.session_state.portfolio).to_csv(PORTFOLIO_FILE, index=False)
-            st.rerun()
+        st.session_state.portfolio.append({
+            "Ticker": f"{p_vt}.NS", "Symbol": p_vt, 
+            "Qty": p_vq, "BuyPrice": p_vp, "StopPrice": p_sl
+        })
+        pd.DataFrame(st.session_state.portfolio).to_csv(PORTFOLIO_FILE, index=False)
+        st.rerun()
 
     if st.session_state.portfolio:
         p_res = []
@@ -151,20 +151,14 @@ with tab2:
                 raw_v = c_raw[i['Ticker']].dropna().iloc[-1] if len(p_list) > 1 else c_raw.dropna().iloc[-1]
                 c_px = float(raw_v)
                 
-                # --- ALERT LOGIC ---
+                # Alert Logic
                 if c_px <= i['StopPrice']:
-                    st.toast(f"🚨 STOP LOSS HIT: {i['Symbol']} at ₹{c_px}", icon="⚠️")
-                    # Play a short alert chime
+                    st.toast(f"🚨 ALERT: {i['Symbol']} hit Stop Loss at ₹{c_px}", icon="⚠️")
                     st.audio("https://www.soundjay.com/buttons/beep-01a.mp3", autoplay=True)
                 
                 pnl = (c_px - i['BuyPrice']) * i['Qty']
                 total_pnl += pnl
-                p_res.append({
-                    "Stock": i['Symbol'], "Qty": i['Qty'], 
-                    "Entry": round(float(i['BuyPrice']), 2), 
-                    "StopLoss": round(float(i['StopPrice']), 2),
-                    "Current": round(c_px, 2), "P&L": round(float(pnl), 2)
-                })
+                p_res.append({"Stock": i['Symbol'], "Qty": i['Qty'], "Entry": i['BuyPrice'], "Stop": i['StopPrice'], "Current": round(c_px, 2), "P&L": round(float(pnl), 2)})
             except: continue
         st.dataframe(pd.DataFrame(p_res), use_container_width=True, hide_index=True)
         st.metric("Total P&L", f"₹{total_pnl:,.2f}", delta=round(float(total_pnl), 2))
@@ -175,14 +169,10 @@ with tab2:
 
 # --- TAB 3: WATCHLIST ---
 with tab3:
-    st.subheader("🔍 Market Search")
-    lu = st.text_input("Enter Ticker:", key="v_lu_w").upper()
-    if lu:
-        try:
-            px = float(yf.Ticker(f"{lu}.NS").history(period="1d")['Close'].iloc[-1])
-            st.write(f"**Current Price:** ₹{px:,.2f}")
-            if st.button(f"Add {lu} to Watchlist"):
-                if lu not in st.session_state.watchlist: st.session_state.watchlist.append(lu)
-        except: st.error("Lookup failed.")
+    st.subheader("🔍 Stock Watchlist")
+    lu = st.selectbox("Quick Add (Nifty 50):", options=NIFTY_50_TICKERS, key="lu_w")
+    if st.button(f"Add {lu} to Watchlist"):
+        if lu not in st.session_state.watchlist: 
+            st.session_state.watchlist.append(lu)
     st.divider()
     for s in st.session_state.watchlist: st.write(f"🔹 {s}")
