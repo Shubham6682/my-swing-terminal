@@ -13,9 +13,9 @@ PORTFOLIO_FILE = "virtual_portfolio.csv"
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
-# Market is OPEN: Refresh every 15s
+# Market Hours: 9:15 AM - 3:30 PM IST (Refresh every 15s)
 is_open = (now.weekday() < 5) and (9 <= now.hour < 16)
-st_autorefresh(interval=15000 if is_open else 60000, key="sentinel_final_sync")
+st_autorefresh(interval=15000 if is_open else 60000, key="sentinel_sensex_sync")
 
 # --- 2. PERSISTENCE LAYER ---
 if 'portfolio' not in st.session_state:
@@ -28,15 +28,17 @@ if 'alert_log' not in st.session_state: st.session_state.alert_log = {}
 if 'watchlist' not in st.session_state: st.session_state.watchlist = []
 if 'triggers' not in st.session_state: st.session_state.triggers = {}
 
-# --- 3. HEADER & DASHBOARD ---
+# --- 3. HEADER & DASHBOARD (SENSEX RESTORED) ---
 st.title("🏹 Elite Sentinel Pro Terminal")
-indices = {"Nifty 50": "^NSEI", "Bank Nifty": "^NSEBANK"}
+# Added Sensex (^BSESN) to the indices list
+indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
 idx_cols = st.columns(len(indices) + 1)
 for i, (name, ticker) in enumerate(indices.items()):
     try:
         df_i = yf.Ticker(ticker).history(period="2d")
-        c, p = df_i['Close'].iloc[-1], df_i['Close'].iloc[-2]
-        idx_cols[i].metric(name, f"{c:,.2f}", f"{((c-p)/p)*100:+.2f}%")
+        if not df_i.empty:
+            c, p = df_i['Close'].iloc[-1], df_i['Close'].iloc[-2]
+            idx_cols[i].metric(name, f"{c:,.2f}", f"{((c-p)/p)*100:+.2f}%")
     except: pass
 idx_cols[-1].write(f"**{'🟢 OPEN' if is_open else '⚪ CLOSED'}**\n{now.strftime('%H:%M:%S')}")
 st.divider()
@@ -61,7 +63,7 @@ with st.sidebar:
 NIFTY_50 = ["ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK", "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BEL", "BPCL", "BHARTIARTL", "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "ITC", "INDUSINDBK", "INFY", "JSWSTEEL", "KOTAKBANK", "LT", "LTIM", "M&M", "MARUTI", "NTPC", "NESTLEIND", "ONGC", "POWERGRID", "RELIANCE", "SBILIFE", "SHRIRAMFIN", "SBIN", "SUNPHARMA", "TCS", "TATACONSUM", "TATAMOTORS", "TATASTEEL", "TECHM", "TITAN", "ULTRACEMCO", "WIPRO"]
 TICKERS_NS = [f"{t}.NS" for t in NIFTY_50]
 
-@st.cache_data(ttl=15) # Shorter TTL for opening volatility
+@st.cache_data(ttl=15)
 def fetch_market_data():
     h = yf.download(TICKERS_NS + ["^NSEI"], period="1y", progress=False)['Close']
     l = yf.download(TICKERS_NS, period="1d", interval="1m", progress=False)['Close']
@@ -109,7 +111,7 @@ with tab1:
                 results.append(res)
             except: continue
         st.dataframe(pd.DataFrame(results).sort_values("Status"), use_container_width=True, hide_index=True)
-    except: st.info("Updating Data...")
+    except: st.info("Scanning Market...")
 
 with tab2:
     if st.session_state.portfolio:
