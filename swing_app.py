@@ -11,14 +11,14 @@ from streamlit_autorefresh import st_autorefresh
 # --- 1. SYSTEM SETUP ---
 st.set_page_config(page_title="Elite Quant Terminal", layout="wide")
 PORTFOLIO_FILE = "virtual_portfolio.csv"
-JOURNAL_FILE = "trade_journal.csv"    # Realized P&L (Closed Trades)
-DAILY_LOG_FILE = "daily_equity.csv"   # Daily Snapshots (Net Worth)
+JOURNAL_FILE = "trade_journal.csv"
+DAILY_LOG_FILE = "daily_equity.csv"
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
 # Refresh Rate
 is_open = (now.weekday() < 5) and (9 <= now.hour < 16)
-st_autorefresh(interval=30000 if is_open else 60000, key="quant_final_sync")
+st_autorefresh(interval=30000 if is_open else 60000, key="quant_ui_fix")
 
 # --- 2. PERSISTENCE & DATA LOADING ---
 def load_data(file):
@@ -53,12 +53,11 @@ def calculate_bollinger_width(series, period=20):
     return ((sma + (2 * std)) - (sma - (2 * std))) / sma
 
 # --- 4. HEADER ---
-st.title("🏹 Elite Quant Terminal: Automated Ledger")
+st.title("🏹 Elite Quant Terminal: Professional UI")
 indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
 idx_cols = st.columns(len(indices) + 1)
 for i, (name, ticker) in enumerate(indices.items()):
     try:
-        # threads=False to prevent crashes
         df_i = yf.Ticker(ticker).history(period="5d")
         if not df_i.empty:
             c, p = df_i['Close'].iloc[-1], df_i['Close'].iloc[-2]
@@ -71,6 +70,10 @@ st.divider()
 with st.sidebar:
     st.header("🧠 Strategy Engine")
     strategy_mode = st.radio("Mode:", ["🛡️ Pro Sentinel (Swing)", "🎯 Elite Sniper (Extreme)"])
+    
+    # Debug Toggle (Defaulted to True for reassurance)
+    show_all = st.checkbox("Show All Stocks (Debug)", value=True, help="See all stocks even if they don't match criteria.")
+    
     st.divider()
     st.header("🤖 Auto-Bot")
     auto_trade_on = st.checkbox("Active Trading", value=False)
@@ -88,7 +91,6 @@ TICKERS_NS = [f"{t}.NS" for t in NIFTY_50]
 
 @st.cache_data(ttl=60)
 def fetch_data():
-    # threads=False is CRITICAL
     h = yf.download(TICKERS_NS + ["^NSEI"], period="1y", threads=False, progress=False)['Close']
     l = yf.download(TICKERS_NS, period="1d", interval="1m", threads=False, progress=False)['Close']
     v = yf.download(TICKERS_NS, period="1mo", threads=False, progress=False)['Volume']
@@ -96,11 +98,13 @@ def fetch_data():
     return h, l, v
 
 # --- 7. TABS ---
-# This line creates the tabs. They MUST be created here.
-tab1, tab2, tab3 = st.tabs(["📊 Scanner", "🚀 Active Portfolio", "📈 Performance & Analysis"])
+tab1, tab2, tab3 = st.tabs(["📊 Scanner", "🚀 Active Portfolio", "📈 Analysis Center"])
 
 # --- TAB 1: SCANNER ---
 with tab1:
+    # Always display a placeholder first so the UI doesn't look empty
+    table_placeholder = st.empty()
+    
     try:
         h_data, l_data, v_data = fetch_data()
         results = []
@@ -128,11 +132,13 @@ with tab1:
                     elif vol_spike and rsi > 55: 
                         status = "🚀 BREAKOUT"
                         trigger = ltp
+                    else: status = "😴 SLEEPING"
 
                 gap = ((ltp - trigger)/trigger)*100
                 
-                # Add to results
-                results.append({"Stock": t.replace(".NS",""), "Status": status, "LTP": round(ltp,2), "Entry": trigger, "Gap %": f"{gap:.2f}%"})
+                # Visibility Logic
+                if status != "😴 SLEEPING" or show_all or strategy_mode == "🛡️ Pro Sentinel (Swing)":
+                     results.append({"Stock": t.replace(".NS",""), "Status": status, "LTP": round(ltp,2), "Entry": trigger, "Gap %": f"{gap:.2f}%"})
 
                 # Bot Logic
                 if auto_trade_on and (status == "🎯 CONFIRMED" or status == "🚀 BREAKOUT"):
@@ -152,16 +158,21 @@ with tab1:
                         st.session_state.alert_log[sym] = time.time()
             except: continue
         
-        # Display Results
+        # --- THE FIX: ALWAYS SHOW TABLE ---
         if results:
             df_disp = pd.DataFrame(results)
-            df_disp['Sort'] = df_disp['Status'].map({"🎯 CONFIRMED": 0, "🚀 BREAKOUT": 0, "👀 COILING": 1, "⏳ WAIT": 2})
+            df_disp['Sort'] = df_disp['Status'].map({"🎯 CONFIRMED": 0, "🚀 BREAKOUT": 0, "👀 COILING": 1, "⏳ WAIT": 2, "😴 SLEEPING": 3})
             df_disp = df_disp.sort_values('Sort').drop('Sort', axis=1)
-            st.dataframe(df_disp, use_container_width=True, hide_index=True)
+            table_placeholder.dataframe(df_disp, use_container_width=True, hide_index=True)
+        else:
+            # Show an EMPTY table with headers instead of nothing
+            empty_df = pd.DataFrame(columns=["Stock", "Status", "LTP", "Entry", "Gap %"])
+            table_placeholder.dataframe(empty_df, use_container_width=True, hide_index=True)
+            st.info("System Active. No stocks meet the 'Extreme' criteria right now.")
             
-    except Exception as e: st.info(f"Scanning... {e}")
+    except Exception as e: st.error(f"Data Error: {e}")
 
-# --- TAB 2: ACTIVE PORTFOLIO + AUTO SNAPSHOT ---
+# --- TAB 2: ACTIVE PORTFOLIO ---
 with tab2:
     current_portfolio_value = 0
     if st.session_state.portfolio:
@@ -189,22 +200,15 @@ with tab2:
         k3.metric("Net P&L", f"₹{net_pl:,.2f}", f"{pl_pct:.2f}%")
         st.divider()
 
-        # --- AUTO-LOGIC: MARKET CLOSE SNAPSHOT ---
-        # If market is closed AND we haven't saved today's log yet -> Save it.
         if not is_open:
             today_str = now.strftime("%Y-%m-%d")
             log_df = pd.DataFrame()
             if os.path.exists(DAILY_LOG_FILE): log_df = pd.read_csv(DAILY_LOG_FILE)
-            
-            # Check if today is already logged
             if log_df.empty or today_str not in log_df['Date'].values:
                 new_log = {"Date": today_str, "TotalValue": current_portfolio_value, "NetPnL": net_pl}
-                if not log_df.empty:
-                    log_df = pd.concat([log_df, pd.DataFrame([new_log])], ignore_index=True)
-                else:
-                    log_df = pd.DataFrame([new_log])
+                log_df = pd.concat([log_df, pd.DataFrame([new_log])], ignore_index=True) if not log_df.empty else pd.DataFrame([new_log])
                 log_df.to_csv(DAILY_LOG_FILE, index=False)
-                st.toast("📸 Daily Performance Snapshot Saved!")
+                st.toast("📸 Snapshot Saved")
 
         for i, trade in enumerate(st.session_state.portfolio):
             try:
@@ -228,22 +232,18 @@ with tab2:
             except: continue
     else: st.info("Portfolio Empty")
 
-# --- TAB 3: ANALYSIS CENTER (WEEKLY REPORT) ---
+# --- TAB 3: ANALYSIS CENTER ---
 with tab3:
     st.header("📈 Weekly Performance Review")
     
     if st.session_state.journal:
         df_j = pd.DataFrame(st.session_state.journal)
-        # Ensure ExitDate is datetime
         df_j['ExitDate'] = pd.to_datetime(df_j['ExitDate'])
         
-        # 1. VISUALIZE THE WEEK
         st.subheader("1. This Week's P&L Curve")
-        # Filter for current week's data only
         current_week = df_j[df_j['ExitDate'] > (pd.Timestamp(now) - pd.Timedelta(days=7))]
         
         if not current_week.empty:
-            # Show the Net P&L for this week
             week_pl = current_week['PnL'].sum()
             col1, col2, col3 = st.columns(3)
             col1.metric("Week's Net P&L", f"₹{week_pl:.2f}", delta_color="normal")
@@ -252,42 +252,29 @@ with tab3:
             col3.metric("Win Rate", f"{win_pct:.1f}%")
             
             st.bar_chart(current_week, x='Symbol', y='PnL')
-            
             st.divider()
             
-            # 2. HEROES & VILLAINS (Best vs Worst)
             st.subheader("2. Stock Performance Attribution")
             c1, c2 = st.columns(2)
-            
             with c1:
                 st.write("🏆 **Top Profit Makers**")
                 winners = current_week[current_week['PnL'] > 0].sort_values("PnL", ascending=False).head(3)
-                if not winners.empty:
-                    st.dataframe(winners[['Symbol', 'PnL', 'Result']], use_container_width=True, hide_index=True)
+                if not winners.empty: st.dataframe(winners[['Symbol', 'PnL', 'Result']], use_container_width=True, hide_index=True)
                 else: st.info("No winners this week.")
-                
             with c2:
                 st.write("⚠️ **Top Loss Makers**")
                 losers = current_week[current_week['PnL'] < 0].sort_values("PnL", ascending=True).head(3)
-                if not losers.empty:
-                    st.dataframe(losers[['Symbol', 'PnL', 'Result']], use_container_width=True, hide_index=True)
-                else: st.success("No losers this week! 🎉")
-
-        else:
-            st.info("No closed trades yet this week. Close positions in Tab 2 to see the report.")
+                if not losers.empty: st.dataframe(losers[['Symbol', 'PnL', 'Result']], use_container_width=True, hide_index=True)
+                else: st.success("No losers this week!")
+        else: st.info("No closed trades yet this week.")
             
         st.divider()
-
-        # 3. LONG TERM HISTORY
         st.subheader("3. Monthly Ledger")
-        # Resample by Month (M)
         monthly = df_j.set_index('ExitDate').resample('M')['PnL'].sum().reset_index()
         monthly['ExitDate'] = monthly['ExitDate'].dt.strftime('%B %Y')
         st.dataframe(monthly, use_container_width=True)
         
-        # Download Data
         csv = df_j.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Trade History (CSV)", csv, "full_trade_history.csv", "text/csv")
         
-    else:
-        st.info("Your Journal is empty. The analysis will start automatically after your first trade.")
+    else: st.info("Journal Empty. Close a trade to start analysis.")
