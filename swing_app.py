@@ -13,21 +13,22 @@ st.set_page_config(page_title="Elite Quant Terminal", layout="wide")
 PORTFOLIO_FILE = "virtual_portfolio.csv"
 JOURNAL_FILE = "trade_journal.csv"
 DAILY_LOG_FILE = "daily_equity.csv"
+
+# TIMEZONE SETUP
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
-# FIXED MARKET HOURS LOGIC
-# Market is Open if: Weekday (0-4) AND Time is between 09:15 and 15:30
+# MARKET HOURS LOGIC (09:15 - 15:30)
+# We compare the current time object directly
 market_start = datetime.time(9, 15)
 market_end = datetime.time(15, 30)
 current_time = now.time()
 
+# Check: Weekday (Mon=0, Fri=4) AND Time is within range
 is_open = (now.weekday() < 5) and (market_start <= current_time < market_end)
 
 # Refresh Rate: 30s if Open, 60s if Closed
-st_autorefresh(interval=30000 if is_open else 60000, key="quant_time_fix")
-is_open = (now.weekday() < 5) and (9 <= now.hour < 16)
-st_autorefresh(interval=30000 if is_open else 60000, key="quant_smart_exit")
+st_autorefresh(interval=30000 if is_open else 60000, key="quant_final_fix")
 
 # --- 2. PERSISTENCE & DATA LOADING ---
 def load_data(file):
@@ -62,7 +63,7 @@ def calculate_bollinger_width(series, period=20):
     return ((sma + (2 * std)) - (sma - (2 * std))) / sma
 
 # --- 4. HEADER ---
-st.title("🏹 Elite Quant Terminal: Smart Exit Edition")
+st.title("🏹 Elite Quant Terminal: Final Edition")
 indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
 idx_cols = st.columns(len(indices) + 1)
 for i, (name, ticker) in enumerate(indices.items()):
@@ -184,7 +185,6 @@ with tab2:
             try: return float(live_p[ticker].dropna().iloc[-1]) if len(p_list)>1 else float(live_p.dropna().iloc[-1])
             except: return 0.0
 
-        # --- PORTFOLIO DASHBOARD ---
         for trade in st.session_state.portfolio:
             cv = get_price(trade['Ticker'])
             if cv > 0:
@@ -200,36 +200,38 @@ with tab2:
         k3.metric("Net P&L", f"₹{net_pl:,.2f}", f"{pl_pct:.2f}%")
         st.divider()
 
-        # --- SMART TRAILING LOGIC & DISPLAY ---
+        # DAILY SNAPSHOT (Auto-Save on Close)
+        if not is_open:
+            today_str = now.strftime("%Y-%m-%d")
+            log_df = pd.DataFrame()
+            if os.path.exists(DAILY_LOG_FILE): log_df = pd.read_csv(DAILY_LOG_FILE)
+            if log_df.empty or today_str not in log_df['Date'].values:
+                new_log = {"Date": today_str, "TotalValue": current_portfolio_value, "NetPnL": net_pl}
+                log_df = pd.concat([log_df, pd.DataFrame([new_log])], ignore_index=True) if not log_df.empty else pd.DataFrame([new_log])
+                log_df.to_csv(DAILY_LOG_FILE, index=False)
+                st.toast("📸 Snapshot Saved")
+
         for i, trade in enumerate(st.session_state.portfolio):
             try:
                 cv = get_price(trade['Ticker'])
                 current_profit_pct = ((cv - trade['BuyPrice']) / trade['BuyPrice']) * 100
                 
-                # INTELLIGENCE: Auto-Update Stop Loss
                 new_sl = trade['StopPrice']
                 status_msg = ""
                 
-                # Rule 1: Breakeven at +3%
                 if current_profit_pct > 3.0 and trade['StopPrice'] < trade['BuyPrice']:
                     new_sl = trade['BuyPrice']
                     status_msg = "🛡️ RISK FREE"
-                
-                # Rule 2: Trailing Stop at +5% (Trail by 2%)
                 elif current_profit_pct > 5.0:
                     trail_price = cv * 0.98
                     if trail_price > new_sl:
                         new_sl = trail_price
                         status_msg = "📈 TRAILING UP"
                 
-                # Rule 3: Stop Hit
-                if cv < new_sl:
-                    status_msg = "❌ STOP HIT"
+                if cv < new_sl: status_msg = "❌ STOP HIT"
 
-                # Update Memory
                 st.session_state.portfolio[i]['StopPrice'] = round(new_sl, 2)
                 
-                # Display Row
                 pl = (cv - trade['BuyPrice']) * trade['Qty']
                 c1, c2, c3, c4, c5 = st.columns(5)
                 c1.write(f"**{trade['Symbol']}**")
@@ -237,7 +239,6 @@ with tab2:
                 c3.metric("LTP", f"{round(cv, 2)}", f"{current_profit_pct:.2f}%")
                 c4.metric("Stop Loss", f"{round(new_sl, 2)}", help="Auto-updates via Smart Exit Engine")
                 
-                # Close Button
                 if c5.button(f"✅ CLOSE {status_msg}", key=f"close_{i}"):
                     closed_trade = trade.copy()
                     closed_trade['ExitPrice'] = cv
@@ -250,17 +251,6 @@ with tab2:
                     st.rerun()
 
             except: continue
-            
-        # Daily Snapshot
-        if not is_open:
-            today_str = now.strftime("%Y-%m-%d")
-            log_df = pd.DataFrame()
-            if os.path.exists(DAILY_LOG_FILE): log_df = pd.read_csv(DAILY_LOG_FILE)
-            if log_df.empty or today_str not in log_df['Date'].values:
-                new_log = {"Date": today_str, "TotalValue": current_portfolio_value, "NetPnL": net_pl}
-                log_df = pd.concat([log_df, pd.DataFrame([new_log])], ignore_index=True) if not log_df.empty else pd.DataFrame([new_log])
-                log_df.to_csv(DAILY_LOG_FILE, index=False)
-                st.toast("📸 Snapshot Saved")
     else: st.info("Portfolio Empty")
 
 # --- TAB 3: ANALYSIS CENTER ---
@@ -307,4 +297,3 @@ with tab3:
         st.download_button("📥 Download Trade History (CSV)", csv, "full_trade_history.csv", "text/csv")
         
     else: st.info("Journal Empty. Close a trade to start analysis.")
-
