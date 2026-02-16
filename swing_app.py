@@ -16,7 +16,16 @@ DAILY_LOG_FILE = "daily_equity.csv"
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
-# Refresh Rate
+# FIXED MARKET HOURS LOGIC
+# Market is Open if: Weekday (0-4) AND Time is between 09:15 and 15:30
+market_start = datetime.time(9, 15)
+market_end = datetime.time(15, 30)
+current_time = now.time()
+
+is_open = (now.weekday() < 5) and (market_start <= current_time < market_end)
+
+# Refresh Rate: 30s if Open, 60s if Closed
+st_autorefresh(interval=30000 if is_open else 60000, key="quant_time_fix")
 is_open = (now.weekday() < 5) and (9 <= now.hour < 16)
 st_autorefresh(interval=30000 if is_open else 60000, key="quant_smart_exit")
 
@@ -298,3 +307,4 @@ with tab3:
         st.download_button("📥 Download Trade History (CSV)", csv, "full_trade_history.csv", "text/csv")
         
     else: st.info("Journal Empty. Close a trade to start analysis.")
+
