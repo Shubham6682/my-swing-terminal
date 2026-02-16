@@ -11,15 +11,16 @@ from streamlit_autorefresh import st_autorefresh
 # --- 1. SYSTEM SETUP ---
 st.set_page_config(page_title="Elite Quant Terminal", layout="wide")
 PORTFOLIO_FILE = "virtual_portfolio.csv"
-JOURNAL_FILE = "trade_journal.csv"
+JOURNAL_FILE = "trade_journal.csv"    # Closed Trades (Realized P&L)
+DAILY_LOG_FILE = "daily_equity.csv"   # Daily Snapshots (Net Worth)
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
 # Refresh Rate
 is_open = (now.weekday() < 5) and (9 <= now.hour < 16)
-st_autorefresh(interval=30000 if is_open else 60000, key="quant_sync_pl")
+st_autorefresh(interval=30000 if is_open else 60000, key="quant_final_sync")
 
-# --- 2. PERSISTENCE LAYER ---
+# --- 2. PERSISTENCE & DATA LOADING ---
 def load_data(file):
     if os.path.exists(file): return pd.read_csv(file).to_dict('records')
     return []
@@ -32,10 +33,7 @@ if 'alert_log' not in st.session_state: st.session_state.alert_log = {}
 def save_journal(trade):
     df = pd.DataFrame(st.session_state.journal)
     new_row = pd.DataFrame([trade])
-    if not df.empty:
-        df = pd.concat([df, new_row], ignore_index=True)
-    else:
-        df = new_row
+    df = pd.concat([df, new_row], ignore_index=True) if not df.empty else new_row
     df.to_csv(JOURNAL_FILE, index=False)
     st.session_state.journal = df.to_dict('records')
 
@@ -52,7 +50,7 @@ def calculate_bollinger_width(series, period=20):
     return ((sma + (2 * std)) - (sma - (2 * std))) / sma
 
 # --- 4. HEADER ---
-st.title("🏹 Elite Quant Terminal: Portfolio Dashboard")
+st.title("🏹 Elite Quant Terminal: Automated Ledger")
 indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
 idx_cols = st.columns(len(indices) + 1)
 for i, (name, ticker) in enumerate(indices.items()):
@@ -93,7 +91,7 @@ def fetch_data():
     return h, l, v
 
 # --- 7. TABS ---
-tab1, tab2, tab3 = st.tabs(["📊 Scanner", "🚀 Active Portfolio", "📈 Performance Report"])
+tab1, tab2, tab3 = st.tabs(["📊 Scanner", "🚀 Active Portfolio", "📈 Performance & Analysis"])
 
 # --- TAB 1: SCANNER ---
 with tab1:
@@ -108,7 +106,6 @@ with tab1:
                 ltp = float(l_data[t].dropna().iloc[-1])
                 status, trigger = "⏳ WAIT", 0.0
                 
-                # Logic Switch
                 if strategy_mode == "🛡️ Pro Sentinel (Swing)":
                     high_5d = hist.tail(6).iloc[:-1].max()
                     trigger = round(high_5d * 1.002, 2)
@@ -116,7 +113,7 @@ with tab1:
                     dma200 = hist.rolling(200).mean().iloc[-1]
                     if ltp >= trigger and ltp > dma200 and is_leader: status = "🎯 CONFIRMED"
                     
-                else: # Sniper
+                else: 
                     rsi = calculate_rsi(hist).iloc[-1]
                     bb_width = calculate_bollinger_width(hist).iloc[-1]
                     vol_spike = v_data[t].iloc[-1] > (v_data[t].rolling(20).mean().iloc[-1] * 1.5)
@@ -128,7 +125,6 @@ with tab1:
                 gap = ((ltp - trigger)/trigger)*100
                 results.append({"Stock": t.replace(".NS",""), "Status": status, "LTP": round(ltp,2), "Entry": trigger, "Gap %": f"{gap:.2f}%"})
 
-                # Bot Logic
                 if auto_trade_on and (status == "🎯 CONFIRMED" or status == "🚀 BREAKOUT"):
                     sym = t.replace(".NS","")
                     holdings = [p['Symbol'] for p in st.session_state.portfolio]
@@ -146,7 +142,6 @@ with tab1:
                         st.session_state.alert_log[sym] = time.time()
             except: continue
         
-        # Display: Custom Sort
         if results:
             df_disp = pd.DataFrame(results)
             df_disp['Sort'] = df_disp['Status'].map({"🎯 CONFIRMED": 0, "🚀 BREAKOUT": 0, "👀 COILING": 1, "⏳ WAIT": 2})
@@ -155,51 +150,58 @@ with tab1:
             
     except Exception as e: st.info(f"Scanning... {e}")
 
-# --- TAB 2: ACTIVE PORTFOLIO ---
+# --- TAB 2: ACTIVE PORTFOLIO + AUTO SNAPSHOT ---
 with tab2:
+    current_portfolio_value = 0
     if st.session_state.portfolio:
         p_list = [i['Ticker'] for i in st.session_state.portfolio]
         live_p = yf.download(p_list, period="1d", interval="1m", threads=False, progress=False)['Close']
         if live_p.empty: live_p = h_data[p_list].tail(1)
         
-        # --- CALCULATE TOTALS FIRST ---
         total_invested = 0
-        total_current_val = 0
-        
-        # Helper to get price safely
         def get_price(ticker):
-            try:
-                return float(live_p[ticker].dropna().iloc[-1]) if len(p_list)>1 else float(live_p.dropna().iloc[-1])
+            try: return float(live_p[ticker].dropna().iloc[-1]) if len(p_list)>1 else float(live_p.dropna().iloc[-1])
             except: return 0.0
 
         for trade in st.session_state.portfolio:
             cv = get_price(trade['Ticker'])
             if cv > 0:
                 total_invested += trade['BuyPrice'] * trade['Qty']
-                total_current_val += cv * trade['Qty']
+                current_portfolio_value += cv * trade['Qty']
         
-        net_pl = total_current_val - total_invested
+        net_pl = current_portfolio_value - total_invested
         pl_pct = (net_pl / total_invested * 100) if total_invested > 0 else 0
         
-        # --- DASHBOARD UI ---
         k1, k2, k3 = st.columns(3)
         k1.metric("Total Invested", f"₹{total_invested:,.2f}")
-        k2.metric("Current Value", f"₹{total_current_val:,.2f}")
+        k2.metric("Current Value", f"₹{current_portfolio_value:,.2f}")
         k3.metric("Net P&L", f"₹{net_pl:,.2f}", f"{pl_pct:.2f}%")
         st.divider()
 
-        # --- INDIVIDUAL ROWS ---
+        # --- AUTO-LOGIC: MARKET CLOSE SNAPSHOT ---
+        # If market is closed AND we haven't saved today's log yet -> Save it.
+        if not is_open:
+            today_str = now.strftime("%Y-%m-%d")
+            log_df = pd.DataFrame()
+            if os.path.exists(DAILY_LOG_FILE): log_df = pd.read_csv(DAILY_LOG_FILE)
+            
+            # Check if today is already logged
+            if log_df.empty or today_str not in log_df['Date'].values:
+                new_log = {"Date": today_str, "TotalValue": current_portfolio_value, "NetPnL": net_pl}
+                # Use pd.concat instead of append
+                log_df = pd.concat([log_df, pd.DataFrame([new_log])], ignore_index=True)
+                log_df.to_csv(DAILY_LOG_FILE, index=False)
+                st.toast("📸 Daily Performance Snapshot Saved!")
+
         for i, trade in enumerate(st.session_state.portfolio):
             try:
                 cv = get_price(trade['Ticker'])
                 pl = (cv - trade['BuyPrice']) * trade['Qty']
-                
                 c1, c2, c3, c4, c5 = st.columns(5)
                 c1.write(f"**{trade['Symbol']}**")
-                c2.write(f"Entry: {trade['BuyPrice']}")
-                c3.write(f"LTP: {round(cv, 2)}")
+                c2.write(f"{trade['BuyPrice']}")
+                c3.write(f"{round(cv, 2)}")
                 c4.metric("P&L", f"{pl:.2f}")
-                
                 if c5.button("✅ CLOSE", key=f"close_{i}"):
                     closed_trade = trade.copy()
                     closed_trade['ExitPrice'] = cv
@@ -213,29 +215,57 @@ with tab2:
             except: continue
     else: st.info("Portfolio Empty")
 
-# --- TAB 3: PERFORMANCE REPORT ---
+# --- TAB 3: ANALYSIS CENTER ---
 with tab3:
-    st.header("📈 Strategy Performance Report")
+    st.header("📈 Performance & Analysis Center")
     
+    # SECTION A: EQUITY CURVE (Daily Growth)
+    st.subheader("1. Portfolio Growth (Daily Snapshot)")
+    if os.path.exists(DAILY_LOG_FILE):
+        df_log = pd.read_csv(DAILY_LOG_FILE)
+        if not df_log.empty:
+            st.line_chart(df_log.set_index("Date")['NetPnL'])
+        else: st.info("No daily logs yet. Wait for market close.")
+    else: st.info("Data will appear here after the first market close.")
+    
+    st.divider()
+
+    # SECTION B: REALIZED P&L (Closed Trades)
+    st.subheader("2. Closed Trade Analysis")
     if st.session_state.journal:
         df_j = pd.DataFrame(st.session_state.journal)
+        df_j['ExitDate'] = pd.to_datetime(df_j['ExitDate'])
         
+        # Win Rate Logic
         total_trades = len(df_j)
         wins = df_j[df_j['PnL'] > 0]
         win_rate = (len(wins) / total_trades) * 100 if total_trades > 0 else 0
-        total_profit = df_j['PnL'].sum()
         
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total Trades", total_trades)
-        m2.metric("Win Rate", f"{win_rate:.1f}%")
-        m3.metric("Net Profit", f"₹{total_profit:.2f}", delta_color="normal")
-        m4.metric("Avg Win", f"₹{wins['PnL'].mean():.2f}" if not wins.empty else "0")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Win Rate", f"{win_rate:.1f}%")
+        m2.metric("Total Profit", f"₹{df_j['PnL'].sum():.2f}")
+        m3.metric("Avg Trade", f"₹{df_j['PnL'].mean():.2f}")
         
-        st.divider()
-        st.subheader("Trade Ledger")
-        st.dataframe(df_j.sort_values("ExitDate", ascending=False), use_container_width=True)
+        # --- WEEKLY & MONTHLY BREAKDOWN ---
+        col_w, col_m = st.columns(2)
         
+        with col_w:
+            st.write("📅 **Weekly P&L**")
+            # Resample by Week (W)
+            weekly = df_j.set_index('ExitDate').resample('W')['PnL'].sum().reset_index()
+            weekly['ExitDate'] = weekly['ExitDate'].dt.strftime('%Y-%b-%d')
+            st.dataframe(weekly, use_container_width=True)
+            
+        with col_m:
+            st.write("📅 **Monthly P&L**")
+            # Resample by Month (ME)
+            monthly = df_j.set_index('ExitDate').resample('ME')['PnL'].sum().reset_index()
+            monthly['ExitDate'] = monthly['ExitDate'].dt.strftime('%Y-%b')
+            st.dataframe(monthly, use_container_width=True)
+            
+        # Download Data
         csv = df_j.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download Report", csv, "trading_report.csv", "text/csv")
+        st.download_button("📥 Download Trade History (CSV)", csv, "full_trade_history.csv", "text/csv")
+        
     else:
-        st.info("No closed trades yet.")
+        st.info("No closed trades yet. Close a trade to generate reports.")
