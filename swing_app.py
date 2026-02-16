@@ -17,7 +17,7 @@ now = datetime.datetime.now(ist)
 
 # Refresh Rate
 is_open = (now.weekday() < 5) and (9 <= now.hour < 16)
-st_autorefresh(interval=30000 if is_open else 60000, key="quant_sync_safe")
+st_autorefresh(interval=30000 if is_open else 60000, key="quant_sync_full")
 
 # --- 2. PERSISTENCE LAYER ---
 def load_data(file):
@@ -31,7 +31,6 @@ if 'alert_log' not in st.session_state: st.session_state.alert_log = {}
 # --- 3. HELPER FUNCTIONS ---
 def save_journal(trade):
     df = pd.DataFrame(st.session_state.journal)
-    # Corrected concat logic for single record
     new_row = pd.DataFrame([trade])
     if not df.empty:
         df = pd.concat([df, new_row], ignore_index=True)
@@ -53,12 +52,11 @@ def calculate_bollinger_width(series, period=20):
     return ((sma + (2 * std)) - (sma - (2 * std))) / sma
 
 # --- 4. HEADER ---
-st.title("🏹 Elite Quant Terminal: Stable Edition")
+st.title("🏹 Elite Quant Terminal: Full Visibility")
 indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
 idx_cols = st.columns(len(indices) + 1)
 for i, (name, ticker) in enumerate(indices.items()):
     try:
-        # threads=False to prevent crashing on Streamlit Cloud
         df_i = yf.Ticker(ticker).history(period="5d")
         if not df_i.empty:
             c, p = df_i['Close'].iloc[-1], df_i['Close'].iloc[-2]
@@ -88,7 +86,6 @@ TICKERS_NS = [f"{t}.NS" for t in NIFTY_50]
 
 @st.cache_data(ttl=60)
 def fetch_data():
-    # threads=False is CRITICAL for stability
     h = yf.download(TICKERS_NS + ["^NSEI"], period="1y", threads=False, progress=False)['Close']
     l = yf.download(TICKERS_NS, period="1d", interval="1m", threads=False, progress=False)['Close']
     v = yf.download(TICKERS_NS, period="1mo", threads=False, progress=False)['Volume']
@@ -96,7 +93,7 @@ def fetch_data():
     return h, l, v
 
 # --- 7. TABS ---
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Scanner", "🚀 Active Portfolio", "🎯 Watchlist", "📈 Performance Report"])
+tab1, tab2, tab3 = st.tabs(["📊 Scanner", "🚀 Active Portfolio", "📈 Performance Report"])
 
 # --- TAB 1: SCANNER ---
 with tab1:
@@ -129,8 +126,9 @@ with tab1:
                         trigger = ltp
 
                 gap = ((ltp - trigger)/trigger)*100
-                if status != "⏳ WAIT" and status != "👀 COILING":
-                    results.append({"Stock": t.replace(".NS",""), "Status": status, "LTP": round(ltp,2), "Entry": trigger, "Gap %": f"{gap:.2f}%"})
+                
+                # APPEND EVERYTHING (No Filter)
+                results.append({"Stock": t.replace(".NS",""), "Status": status, "LTP": round(ltp,2), "Entry": trigger, "Gap %": f"{gap:.2f}%"})
 
                 # Bot Logic
                 if auto_trade_on and (status == "🎯 CONFIRMED" or status == "🚀 BREAKOUT"):
@@ -150,7 +148,14 @@ with tab1:
                         st.session_state.alert_log[sym] = time.time()
             except: continue
         
-        st.dataframe(pd.DataFrame(results))
+        # Display: Sorted so Confirmed is top, Wait is bottom
+        if results:
+            df_disp = pd.DataFrame(results)
+            # Custom sorting: Confirmed -> Coiling -> Wait
+            df_disp['Sort'] = df_disp['Status'].map({"🎯 CONFIRMED": 0, "🚀 BREAKOUT": 0, "👀 COILING": 1, "⏳ WAIT": 2})
+            df_disp = df_disp.sort_values('Sort').drop('Sort', axis=1)
+            st.dataframe(df_disp, use_container_width=True, hide_index=True)
+            
     except Exception as e: st.info(f"Scanning... {e}")
 
 # --- TAB 2: ACTIVE PORTFOLIO ---
@@ -183,14 +188,11 @@ with tab2:
                     pd.DataFrame(st.session_state.portfolio).to_csv(PORTFOLIO_FILE, index=False)
                     st.rerun()
             except: continue
-        st.divider()
+    else: st.info("Portfolio Empty")
+    st.divider()
 
-# --- TAB 3: WATCHLIST ---
+# --- TAB 3: PERFORMANCE REPORT ---
 with tab3:
-    st.write("Target Stocks...")
-
-# --- TAB 4: PERFORMANCE REPORT ---
-with tab4:
     st.header("📈 Strategy Performance Report")
     
     if st.session_state.journal:
