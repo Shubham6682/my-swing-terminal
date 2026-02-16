@@ -101,10 +101,7 @@ with tab1:
                 prev_close = float(hist.iloc[-2])
                 day_change = ((ltp - prev_close) / prev_close) * 100
                 
-                # Logic Variables
-                status = "⏳ WAIT"
-                trigger = 0.0
-                note = ""
+                status, trigger, note = "⏳ WAIT", 0.0, ""
                 
                 # --- STRATEGY 1: PRO SENTINEL ---
                 if strategy_mode == "🛡️ Pro Sentinel (Swing)":
@@ -113,8 +110,7 @@ with tab1:
                     trigger = round(high_5d * 1.002, 2)
                     is_leader = (hist.iloc[-1]/hist.iloc[-63]) > nifty_perf
                     
-                    if ltp >= trigger and ltp > dma200 and is_leader:
-                        status = "🎯 CONFIRMED"
+                    if ltp >= trigger and ltp > dma200 and is_leader: status = "🎯 CONFIRMED"
                     
                     gap = ((ltp - trigger)/trigger)*100
                     note = "🟢 SAFE ZONE"
@@ -135,7 +131,7 @@ with tab1:
                     if bb_width < 0.10: status = "👀 COILING (Squeeze)"
                     elif vol_spike and day_change > 1.5 and rsi > 55: 
                         status = "🚀 BREAKOUT"
-                        trigger = ltp # Immediate entry for sniper
+                        trigger = ltp
                     
                     if status != "😴 SLEEPING":
                         results.append({"Stock": t.replace(".NS",""), "Status": status, "LTP": round(ltp, 2), "Day %": f"{day_change:+.2f}%", "RSI": round(rsi, 1), "Vol Spike": "🔥 YES" if vol_spike else "No", "Squeeze": "✅ YES" if bb_width < 0.10 else "No"})
@@ -143,23 +139,13 @@ with tab1:
                 # --- 🤖 AUTO-TRADING BOT LOGIC ---
                 if auto_trade_on and (status == "🎯 CONFIRMED" or status == "🚀 BREAKOUT"):
                     stock_sym = t.replace(".NS","")
-                    # Check for duplicates in current portfolio
                     current_holdings = [p['Symbol'] for p in st.session_state.portfolio]
                     
                     if stock_sym not in current_holdings:
                         buy_price = trigger if trigger > 0 else ltp
-                        new_trade = {
-                            "Ticker": t,
-                            "Symbol": stock_sym,
-                            "Qty": 1,
-                            "BuyPrice": buy_price,
-                            "StopPrice": round(buy_price * (1 - (risk_p/100)), 2)
-                        }
-                        st.session_state.portfolio.append(new_trade)
+                        st.session_state.portfolio.append({"Ticker": t, "Symbol": stock_sym, "Qty": 1, "BuyPrice": buy_price, "StopPrice": round(buy_price * (1 - (risk_p/100)), 2)})
                         pd.DataFrame(st.session_state.portfolio).to_csv(PORTFOLIO_FILE, index=False)
-                        
-                        # Bot Notification
-                        st.toast(f"🤖 BOT EXECUTED: Bought {stock_sym} at {buy_price}", icon="🛒")
+                        st.toast(f"🤖 BOT EXECUTED: Bought {stock_sym}", icon="🛒")
                         st.session_state.alert_log[stock_sym] = time.time()
                         
             except: continue
@@ -174,12 +160,32 @@ with tab2:
         p_list = [i['Ticker'] for i in st.session_state.portfolio]
         live_p = yf.download(p_list, period="1d", interval="1m", progress=False)['Close']
         if live_p.empty: live_p = h_data[p_list].tail(1)
+        
         disp_p = []
+        total_invested = 0
+        total_current_value = 0
+        
         for i in st.session_state.portfolio:
             try:
                 cv = float(live_p[i['Ticker']].dropna().iloc[-1]) if len(p_list)>1 else float(live_p.dropna().iloc[-1])
-                disp_p.append({"Stock": i['Symbol'], "Qty": i['Qty'], "Entry": i['BuyPrice'], "SL": i['StopPrice'], "Current": round(cv, 2), "P&L": round((cv - i['BuyPrice']) * i['Qty'], 2)})
+                invested = i['BuyPrice'] * i['Qty']
+                current_val = cv * i['Qty']
+                
+                total_invested += invested
+                total_current_value += current_val
+                
+                disp_p.append({"Stock": i['Symbol'], "Qty": i['Qty'], "Entry": i['BuyPrice'], "SL": i['StopPrice'], "Current": round(cv, 2), "P&L": round(current_val - invested, 2)})
             except: continue
+            
+        # --- PORTFOLIO DASHBOARD ---
+        total_pl = total_current_value - total_invested
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Invested", f"₹{total_invested:,.2f}")
+        col2.metric("Current Value", f"₹{total_current_value:,.2f}")
+        col3.metric("Total P&L", f"₹{total_pl:,.2f}", f"{(total_pl/total_invested*100) if total_invested > 0 else 0:.2f}%")
+        st.divider()
+        
         st.dataframe(pd.DataFrame(disp_p), use_container_width=True, hide_index=True)
 
     with st.expander("➕ Manual Entry"):
