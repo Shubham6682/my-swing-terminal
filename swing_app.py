@@ -22,7 +22,7 @@ market_close = datetime.time(15, 30)
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
 # AUTO-REFRESH (30s during market, 60s otherwise)
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_v2")
+st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_v3")
 
 # --- 2. GOOGLE SHEETS DATABASE ENGINE ---
 @st.cache_resource
@@ -118,6 +118,8 @@ for i, (name, ticker) in enumerate(indices.items()):
             prev = df['Close'].iloc[-2]
             pct = ((curr - prev) / prev) * 100
             cols[i].metric(name, f"{curr:,.0f}", f"{pct:+.2f}%")
+        else:
+            cols[i].metric(name, "0", "0%")
     except: cols[i].metric(name, "-", "-")
 
 status_color = "🟢" if is_market_active else "🔴"
@@ -235,7 +237,7 @@ with tab1:
                             "Date": now.strftime("%Y-%m-%d"),
                             "Symbol": symbol,
                             "Ticker": ticker,
-                            "Qty": 1, # Default Qty (Can be dynamic based on capital)
+                            "Qty": 1, # Default Qty
                             "BuyPrice": curr_price,
                             "StopPrice": curr_price * (1 - (risk_per_trade/100)),
                             "Strategy": mode
@@ -340,10 +342,55 @@ with tab2:
         
         st.divider()
         # Summary Metrics
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total Invested", f"₹{total_invested:,.0f}")
-        m2.metric("Current Value", f"₹{total_value:,.0f}")
-        m3.metric("Total P&L", f"₹{(total_value-total_invested):,.0f}", f"{((total_value-total_invested)/total_invested)*100:.2f}%")
+        if total_invested > 0:
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total Invested", f"₹{total_invested:,.0f}")
+            m2.metric("Current Value", f"₹{total_value:,.0f}")
+            m3.metric("Total P&L", f"₹{(total_value-total_invested):,.0f}", f"{((total_value-total_invested)/total_invested)*100:.2f}%")
         
     else:
-        st.info("Portfolio
+        st.info("Portfolio is Empty. Scanner is active...")
+
+# --- TAB 3: ANALYSIS ---
+with tab3:
+    if st.session_state.journal:
+        df_j = pd.DataFrame(st.session_state.journal)
+        df_j['PnL'] = pd.to_numeric(df_j['PnL'])
+        df_j['ExitDate'] = pd.to_datetime(df_j['ExitDate'])
+        
+        st.header("📈 Strategy Audit")
+        
+        # 1. Weekly Analysis
+        st.subheader("Weekly Performance")
+        current_week = df_j[df_j['ExitDate'] > (pd.Timestamp(now) - pd.Timedelta(days=7))]
+        
+        if not current_week.empty:
+            total_pnl = current_week['PnL'].sum()
+            win_count = len(current_week[current_week['PnL'] > 0])
+            total_count = len(current_week)
+            win_rate = (win_count / total_count) * 100
+            
+            k1, k2, k3 = st.columns(3)
+            k1.metric("Net Profit (7D)", f"₹{total_pnl:,.2f}")
+            k2.metric("Trades Taken", total_count)
+            k3.metric("Win Rate", f"{win_rate:.1f}%")
+            
+            st.bar_chart(current_week, x="Symbol", y="PnL")
+        else:
+            st.info("No trades closed in the last 7 days.")
+            
+        st.divider()
+        
+        # 2. Heroes & Villains
+        c1, c2 = st.columns(2)
+        with c1:
+            st.write("🏆 **Top Winners**")
+            if not df_j.empty:
+                st.dataframe(df_j.nlargest(5, 'PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
+        with c2:
+            st.write("⚠️ **Top Losers**")
+            if not df_j.empty:
+                st.dataframe(df_j.nsmallest(5, 'PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
+            
+    else:
+        st.info("Journal is Empty. Close trades to generate analysis.")
