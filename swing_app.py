@@ -4,52 +4,73 @@ import pandas as pd
 import numpy as np
 import datetime
 import pytz
-import os
 import time
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 from streamlit_autorefresh import st_autorefresh
 
 # --- 1. SYSTEM SETUP ---
-st.set_page_config(page_title="Elite Quant Terminal", layout="wide")
-PORTFOLIO_FILE = "virtual_portfolio.csv"
-JOURNAL_FILE = "trade_journal.csv"
-DAILY_LOG_FILE = "daily_equity.csv"
+st.set_page_config(page_title="Elite Quant Terminal (Cloud)", layout="wide")
 
-# TIMEZONE SETUP
+# TIMEZONE
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 
-# MARKET HOURS LOGIC (09:15 - 15:30)
-# We compare the current time object directly
+# MARKET HOURS (09:15 - 15:30)
 market_start = datetime.time(9, 15)
 market_end = datetime.time(15, 30)
-current_time = now.time()
+is_open = (now.weekday() < 5) and (market_start <= now.time() < market_end)
 
-# Check: Weekday (Mon=0, Fri=4) AND Time is within range
-is_open = (now.weekday() < 5) and (market_start <= current_time < market_end)
+st_autorefresh(interval=30000 if is_open else 60000, key="cloud_sync_final")
 
-# Refresh Rate: 30s if Open, 60s if Closed
-st_autorefresh(interval=30000 if is_open else 60000, key="quant_final_fix")
+# --- 2. GOOGLE SHEETS CONNECTION ---
+@st.cache_resource
+def init_connection():
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
+    client = gspread.authorize(creds)
+    return client
 
-# --- 2. PERSISTENCE & DATA LOADING ---
-def load_data(file):
-    if os.path.exists(file): return pd.read_csv(file).to_dict('records')
-    return []
+def load_data(sheet_name):
+    """Fetch data from Google Sheet and return as list of dicts"""
+    try:
+        client = init_connection()
+        sheet = client.open("Swing_Trading_DB").worksheet(sheet_name)
+        data = sheet.get_all_records()
+        return data
+    except Exception as e:
+        return []
 
-if 'portfolio' not in st.session_state: st.session_state.portfolio = load_data(PORTFOLIO_FILE)
-if 'journal' not in st.session_state: st.session_state.journal = load_data(JOURNAL_FILE)
+def save_data(data, sheet_name):
+    """Overwrite Google Sheet tab with new data"""
+    try:
+        client = init_connection()
+        sheet = client.open("Swing_Trading_DB").worksheet(sheet_name)
+        sheet.clear() # Clear old data
+        if len(data) > 0:
+            df = pd.DataFrame(data)
+            # Update with headers + data
+            sheet.update([df.columns.values.tolist()] + df.values.tolist())
+    except Exception as e:
+        st.error(f"Cloud Save Failed: {e}")
+
+def append_to_journal(trade):
+    """Append a single closed trade to the Journal tab"""
+    try:
+        client = init_connection()
+        sheet = client.open("Swing_Trading_DB").worksheet("Journal")
+        # Prepare row values
+        values = list(trade.values())
+        sheet.append_row(values)
+    except Exception as e:
+        st.error(f"Journal Log Failed: {e}")
+
+# Load Data into Session State on Startup
+if 'portfolio' not in st.session_state: st.session_state.portfolio = load_data("Portfolio")
+if 'journal' not in st.session_state: st.session_state.journal = load_data("Journal")
 if 'alert_log' not in st.session_state: st.session_state.alert_log = {} 
 
 # --- 3. HELPER FUNCTIONS ---
-def save_journal(trade):
-    df = pd.DataFrame(st.session_state.journal)
-    new_row = pd.DataFrame([trade])
-    if not df.empty:
-        df = pd.concat([df, new_row], ignore_index=True)
-    else:
-        df = new_row
-    df.to_csv(JOURNAL_FILE, index=False)
-    st.session_state.journal = df.to_dict('records')
-
 def calculate_rsi(series, period=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
@@ -63,35 +84,25 @@ def calculate_bollinger_width(series, period=20):
     return ((sma + (2 * std)) - (sma - (2 * std))) / sma
 
 # --- 4. HEADER ---
-st.title("🏹 Elite Quant Terminal: Final Edition")
-indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
-idx_cols = st.columns(len(indices) + 1)
-for i, (name, ticker) in enumerate(indices.items()):
-    try:
-        df_i = yf.Ticker(ticker).history(period="5d")
-        if not df_i.empty:
-            c, p = df_i['Close'].iloc[-1], df_i['Close'].iloc[-2]
-            idx_cols[i].metric(name, f"{c:,.2f}", f"{((c-p)/p)*100:+.2f}%")
-    except: pass
-idx_cols[-1].write(f"**{'🟢 OPEN' if is_open else '⚪ CLOSED'}**\n{now.strftime('%H:%M:%S')}")
+st.title("☁️ Elite Quant Terminal: Cloud Edition")
+st.caption(f"Connected to Google Sheet 'Swing_Trading_DB' • {now.strftime('%H:%M:%S')}")
 st.divider()
 
 # --- 5. SIDEBAR ---
 with st.sidebar:
     st.header("🧠 Strategy Engine")
     strategy_mode = st.radio("Mode:", ["🛡️ Pro Sentinel (Swing)", "🎯 Elite Sniper (Extreme)"])
-    show_all = st.checkbox("Show All Stocks (Debug)", value=True, help="See all stocks even if they don't match criteria.")
+    show_all = st.checkbox("Show All Stocks (Debug)", value=True)
     
     st.divider()
     st.header("🤖 Auto-Bot")
     auto_trade_on = st.checkbox("Active Trading", value=False)
-    risk_p = st.slider("Initial Risk (%)", 0.5, 3.0, 1.5)
-    st.divider()
-    st.header("🔔 Live Feed")
-    if not st.session_state.alert_log: st.info("Scanning...")
-    else:
-        for s, ts in sorted(st.session_state.alert_log.items(), key=lambda x: x[1], reverse=True)[:5]:
-            st.success(f"🚀 {s}: {int((time.time()-ts)/60)}m ago")
+    risk_p = st.slider("Risk (%)", 0.5, 3.0, 1.5)
+    
+    # Force Save Button
+    if st.button("💾 Force Save to Cloud"):
+        save_data(st.session_state.portfolio, "Portfolio")
+        st.success("Synced to Google Drive!")
 
 # --- 6. DATA ENGINE ---
 NIFTY_50 = ["ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK", "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BEL", "BPCL", "BHARTIARTL", "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "ITC", "INDUSINDBK", "INFY", "JSWSTEEL", "KOTAKBANK", "LT", "LTIM", "M&M", "MARUTI", "NTPC", "NESTLEIND", "ONGC", "POWERGRID", "RELIANCE", "SBILIFE", "SHRIRAMFIN", "SBIN", "SUNPHARMA", "TCS", "TATACONSUM", "TATAMOTORS", "TATASTEEL", "TECHM", "TITAN", "ULTRACEMCO", "WIPRO"]
@@ -140,11 +151,13 @@ with tab1:
                     else: status = "😴 SLEEPING"
 
                 gap = ((ltp - trigger)/trigger)*100
+                
                 if status != "😴 SLEEPING" or show_all or strategy_mode == "🛡️ Pro Sentinel (Swing)":
                      results.append({"Stock": t.replace(".NS",""), "Status": status, "LTP": round(ltp,2), "Entry": trigger, "Gap %": f"{gap:.2f}%"})
 
                 if auto_trade_on and (status == "🎯 CONFIRMED" or status == "🚀 BREAKOUT"):
                     sym = t.replace(".NS","")
+                    # Check current portfolio (from cloud)
                     holdings = [p['Symbol'] for p in st.session_state.portfolio]
                     if sym not in holdings:
                         trade = {
@@ -155,9 +168,8 @@ with tab1:
                             "Strategy": strategy_mode
                         }
                         st.session_state.portfolio.append(trade)
-                        pd.DataFrame(st.session_state.portfolio).to_csv(PORTFOLIO_FILE, index=False)
+                        save_data(st.session_state.portfolio, "Portfolio") # CLOUD SAVE
                         st.toast(f"🤖 BOUGHT {sym}")
-                        st.session_state.alert_log[sym] = time.time()
             except: continue
         
         if results:
@@ -168,11 +180,10 @@ with tab1:
         else:
             empty_df = pd.DataFrame(columns=["Stock", "Status", "LTP", "Entry", "Gap %"])
             table_placeholder.dataframe(empty_df, use_container_width=True, hide_index=True)
-            st.info("System Active. No stocks meet the 'Extreme' criteria right now.")
             
     except Exception as e: st.error(f"Data Error: {e}")
 
-# --- TAB 2: ACTIVE PORTFOLIO (SMART EXIT ENGINE) ---
+# --- TAB 2: ACTIVE PORTFOLIO ---
 with tab2:
     current_portfolio_value = 0
     if st.session_state.portfolio:
@@ -200,17 +211,7 @@ with tab2:
         k3.metric("Net P&L", f"₹{net_pl:,.2f}", f"{pl_pct:.2f}%")
         st.divider()
 
-        # DAILY SNAPSHOT (Auto-Save on Close)
-        if not is_open:
-            today_str = now.strftime("%Y-%m-%d")
-            log_df = pd.DataFrame()
-            if os.path.exists(DAILY_LOG_FILE): log_df = pd.read_csv(DAILY_LOG_FILE)
-            if log_df.empty or today_str not in log_df['Date'].values:
-                new_log = {"Date": today_str, "TotalValue": current_portfolio_value, "NetPnL": net_pl}
-                log_df = pd.concat([log_df, pd.DataFrame([new_log])], ignore_index=True) if not log_df.empty else pd.DataFrame([new_log])
-                log_df.to_csv(DAILY_LOG_FILE, index=False)
-                st.toast("📸 Snapshot Saved")
-
+        changes_made = False
         for i, trade in enumerate(st.session_state.portfolio):
             try:
                 cv = get_price(trade['Ticker'])
@@ -219,6 +220,7 @@ with tab2:
                 new_sl = trade['StopPrice']
                 status_msg = ""
                 
+                # Smart Exit Logic
                 if current_profit_pct > 3.0 and trade['StopPrice'] < trade['BuyPrice']:
                     new_sl = trade['BuyPrice']
                     status_msg = "🛡️ RISK FREE"
@@ -230,14 +232,16 @@ with tab2:
                 
                 if cv < new_sl: status_msg = "❌ STOP HIT"
 
-                st.session_state.portfolio[i]['StopPrice'] = round(new_sl, 2)
+                if new_sl != trade['StopPrice']:
+                    st.session_state.portfolio[i]['StopPrice'] = round(new_sl, 2)
+                    changes_made = True
                 
                 pl = (cv - trade['BuyPrice']) * trade['Qty']
                 c1, c2, c3, c4, c5 = st.columns(5)
                 c1.write(f"**{trade['Symbol']}**")
                 c2.write(f"Entry: {trade['BuyPrice']}")
                 c3.metric("LTP", f"{round(cv, 2)}", f"{current_profit_pct:.2f}%")
-                c4.metric("Stop Loss", f"{round(new_sl, 2)}", help="Auto-updates via Smart Exit Engine")
+                c4.metric("Stop Loss", f"{round(new_sl, 2)}", help="Auto-updates")
                 
                 if c5.button(f"✅ CLOSE {status_msg}", key=f"close_{i}"):
                     closed_trade = trade.copy()
@@ -245,12 +249,22 @@ with tab2:
                     closed_trade['ExitDate'] = now.strftime("%Y-%m-%d")
                     closed_trade['PnL'] = pl
                     closed_trade['Result'] = "WIN" if pl > 0 else "LOSS"
-                    save_journal(closed_trade)
+                    
+                    # 1. Append to Cloud Journal
+                    append_to_journal(closed_trade)
+                    # 2. Update Session State Journal
+                    st.session_state.journal.append(closed_trade)
+                    
+                    # 3. Remove from Portfolio & Save Cloud
                     st.session_state.portfolio.pop(i)
-                    pd.DataFrame(st.session_state.portfolio).to_csv(PORTFOLIO_FILE, index=False)
+                    save_data(st.session_state.portfolio, "Portfolio")
                     st.rerun()
 
             except: continue
+        
+        if changes_made:
+            save_data(st.session_state.portfolio, "Portfolio")
+
     else: st.info("Portfolio Empty")
 
 # --- TAB 3: ANALYSIS CENTER ---
@@ -286,14 +300,5 @@ with tab3:
                 if not losers.empty: st.dataframe(losers[['Symbol', 'PnL', 'Result']], use_container_width=True, hide_index=True)
                 else: st.success("No losers this week!")
         else: st.info("No closed trades yet this week.")
-            
-        st.divider()
-        st.subheader("3. Monthly Ledger")
-        monthly = df_j.set_index('ExitDate').resample('ME')['PnL'].sum().reset_index()
-        monthly['ExitDate'] = monthly['ExitDate'].dt.strftime('%B %Y')
-        st.dataframe(monthly, use_container_width=True)
-        
-        csv = df_j.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download Trade History (CSV)", csv, "full_trade_history.csv", "text/csv")
         
     else: st.info("Journal Empty. Close a trade to start analysis.")
