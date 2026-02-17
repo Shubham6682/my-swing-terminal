@@ -18,12 +18,11 @@ now = datetime.datetime.now(ist)
 
 market_open = datetime.time(9, 15)
 market_close = datetime.time(15, 30)
-
-# Market is active if: Weekday (Mon=0 to Fri=4) AND Time is within 09:15-15:30
+# Market is active if Weekday (Mon=0 to Fri=4) AND Time is within 09:15-15:30
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
 # AUTO-REFRESH (30s during market, 60s otherwise)
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_final")
+st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_final_v2")
 
 # --- 2. GOOGLE SHEETS DATABASE ENGINE ---
 @st.cache_resource
@@ -96,13 +95,20 @@ def calculate_bollinger_width(series, period=20):
     std = series.rolling(window=period).std()
     return ((sma + (2 * std)) - (sma - (2 * std))) / sma
 
-# --- 4. HEADER ---
-st.title("☁️ Elite Quant Terminal")
-st.caption(f"⚡ Connected to Google Sheet | 🕒 {now.strftime('%H:%M:%S')}")
+# --- 4. HEADER (Custom Compact Layout) ---
+c1, c2 = st.columns([3, 1])
+with c1:
+    st.title("☁️ Elite Quant Terminal")
+    st.caption("⚡ Google Cloud Database Active")
+with c2:
+    # DIGITAL CLOCK
+    status_emoji = "🟢" if is_market_active else "🔴"
+    st.metric("Market Time (IST)", f"{now.strftime('%H:%M:%S')}", f"{status_emoji} {'OPEN' if is_market_active else 'CLOSED'}")
 
-# Market Indices
+# INDICES TICKER TAPE (Smaller Font)
 indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
-cols = st.columns(len(indices) + 1)
+cols = st.columns(len(indices))
+
 for i, (name, ticker) in enumerate(indices.items()):
     try:
         df = yf.Ticker(ticker).history(period="5d")
@@ -110,13 +116,21 @@ for i, (name, ticker) in enumerate(indices.items()):
             curr = df['Close'].iloc[-1]
             prev = df['Close'].iloc[-2]
             pct = ((curr - prev) / prev) * 100
-            cols[i].metric(name, f"{curr:,.0f}", f"{pct:+.2f}%")
-        else: cols[i].metric(name, "0", "0%")
-    except: cols[i].metric(name, "-", "-")
+            color = "green" if pct >= 0 else "red"
+            # Using Markdown for smaller font control
+            cols[i].markdown(
+                f"""
+                <div style="border:1px solid #333; padding:10px; border-radius:5px; text-align:center;">
+                    <small>{name}</small><br>
+                    <b style="font-size:18px;">{curr:,.0f}</b><br>
+                    <span style="color:{color}; font-size:14px;">{pct:+.2f}%</span>
+                </div>
+                """, 
+                unsafe_allow_html=True
+            )
+        else: cols[i].info("Loading...")
+    except: cols[i].write("-")
 
-status_text = "OPEN" if is_market_active else "CLOSED"
-status_color = "normal" if is_market_active else "off"
-cols[-1].metric("Market Status", status_text, delta_color=status_color)
 st.divider()
 
 # --- 5. SIDEBAR ---
@@ -135,7 +149,7 @@ with st.sidebar:
         st.success("Synced!")
     
     with st.expander("🔧 Diagnostics"):
-        show_all = st.checkbox("Show All Scanner Results", value=True) # Default True to see "WAIT"
+        show_all = st.checkbox("Show 'WAIT' Stocks", value=True) 
         if st.button("Test DB Connection"):
             if init_google_sheet(): st.success("✅ Connected")
             else: st.error("❌ Failed")
@@ -191,7 +205,7 @@ with tab1:
 
                 gap_pct = ((curr_price - trigger_price) / trigger_price) * 100 if trigger_price > 0 else 0
                 
-                # APPEND LOGIC: Append if Confirmed OR if Show All is True
+                # APPEND LOGIC: Always append if confirmed, check box for others
                 if show_all or status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "👀 WATCH (Squeeze)"]:
                     scan_results.append({
                         "Stock": ticker.replace(".NS", ""),
