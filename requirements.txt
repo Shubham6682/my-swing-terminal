@@ -1,4 +1,7 @@
 streamlit
 yfinance
 pandas
+numpy
 streamlit-autorefresh
+gspread
+oauth2client
