@@ -21,7 +21,7 @@ market_start = datetime.time(9, 15)
 market_end = datetime.time(15, 30)
 is_open = (now.weekday() < 5) and (market_start <= now.time() < market_end)
 
-st_autorefresh(interval=30000 if is_open else 60000, key="cloud_sync_final")
+st_autorefresh(interval=30000 if is_open else 60000, key="cloud_indices_fix")
 
 # --- 2. GOOGLE SHEETS CONNECTION ---
 @st.cache_resource
@@ -32,7 +32,6 @@ def init_connection():
     return client
 
 def load_data(sheet_name):
-    """Fetch data from Google Sheet and return as list of dicts"""
     try:
         client = init_connection()
         sheet = client.open("Swing_Trading_DB").worksheet(sheet_name)
@@ -42,30 +41,26 @@ def load_data(sheet_name):
         return []
 
 def save_data(data, sheet_name):
-    """Overwrite Google Sheet tab with new data"""
     try:
         client = init_connection()
         sheet = client.open("Swing_Trading_DB").worksheet(sheet_name)
-        sheet.clear() # Clear old data
+        sheet.clear() 
         if len(data) > 0:
             df = pd.DataFrame(data)
-            # Update with headers + data
             sheet.update([df.columns.values.tolist()] + df.values.tolist())
     except Exception as e:
         st.error(f"Cloud Save Failed: {e}")
 
 def append_to_journal(trade):
-    """Append a single closed trade to the Journal tab"""
     try:
         client = init_connection()
         sheet = client.open("Swing_Trading_DB").worksheet("Journal")
-        # Prepare row values
         values = list(trade.values())
         sheet.append_row(values)
     except Exception as e:
         st.error(f"Journal Log Failed: {e}")
 
-# Load Data into Session State on Startup
+# Load Data
 if 'portfolio' not in st.session_state: st.session_state.portfolio = load_data("Portfolio")
 if 'journal' not in st.session_state: st.session_state.journal = load_data("Journal")
 if 'alert_log' not in st.session_state: st.session_state.alert_log = {} 
@@ -83,9 +78,26 @@ def calculate_bollinger_width(series, period=20):
     std = series.rolling(window=period).std()
     return ((sma + (2 * std)) - (sma - (2 * std))) / sma
 
-# --- 4. HEADER ---
+# --- 4. HEADER (Restored Indices) ---
 st.title("☁️ Elite Quant Terminal: Cloud Edition")
-st.caption(f"Connected to Google Sheet 'Swing_Trading_DB' • {now.strftime('%H:%M:%S')}")
+st.caption(f"Connected to Google Sheet 'Swing_Trading_DB'")
+
+indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
+idx_cols = st.columns(len(indices) + 1)
+
+for i, (name, ticker) in enumerate(indices.items()):
+    try:
+        # Fetching Live Index Data
+        df_i = yf.Ticker(ticker).history(period="5d")
+        if not df_i.empty:
+            c, p = df_i['Close'].iloc[-1], df_i['Close'].iloc[-2]
+            idx_cols[i].metric(name, f"{c:,.2f}", f"{((c-p)/p)*100:+.2f}%")
+        else:
+            idx_cols[i].metric(name, "Loading...", "0.00%")
+    except: 
+        idx_cols[i].metric(name, "Error", "0.00%")
+
+idx_cols[-1].write(f"**{'🟢 OPEN' if is_open else '⚪ CLOSED'}**\n{now.strftime('%H:%M:%S')}")
 st.divider()
 
 # --- 5. SIDEBAR ---
@@ -99,10 +111,20 @@ with st.sidebar:
     auto_trade_on = st.checkbox("Active Trading", value=False)
     risk_p = st.slider("Risk (%)", 0.5, 3.0, 1.5)
     
-    # Force Save Button
-    if st.button("💾 Force Save to Cloud"):
+    st.divider()
+    if st.button("💾 Force Cloud Save"):
         save_data(st.session_state.portfolio, "Portfolio")
-        st.success("Synced to Google Drive!")
+        st.success("Saved!")
+    
+    st.divider()
+    st.write("🔌 **Diagnostics**")
+    if st.button("Test Google Connection"):
+        try:
+            client = init_connection()
+            sheet = client.open("Swing_Trading_DB")
+            st.success(f"✅ Connected: {sheet.title}")
+        except Exception as e:
+            st.error(f"❌ Failed: {e}")
 
 # --- 6. DATA ENGINE ---
 NIFTY_50 = ["ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK", "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BEL", "BPCL", "BHARTIARTL", "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "ITC", "INDUSINDBK", "INFY", "JSWSTEEL", "KOTAKBANK", "LT", "LTIM", "M&M", "MARUTI", "NTPC", "NESTLEIND", "ONGC", "POWERGRID", "RELIANCE", "SBILIFE", "SHRIRAMFIN", "SBIN", "SUNPHARMA", "TCS", "TATACONSUM", "TATAMOTORS", "TATASTEEL", "TECHM", "TITAN", "ULTRACEMCO", "WIPRO"]
@@ -151,13 +173,11 @@ with tab1:
                     else: status = "😴 SLEEPING"
 
                 gap = ((ltp - trigger)/trigger)*100
-                
                 if status != "😴 SLEEPING" or show_all or strategy_mode == "🛡️ Pro Sentinel (Swing)":
                      results.append({"Stock": t.replace(".NS",""), "Status": status, "LTP": round(ltp,2), "Entry": trigger, "Gap %": f"{gap:.2f}%"})
 
                 if auto_trade_on and (status == "🎯 CONFIRMED" or status == "🚀 BREAKOUT"):
                     sym = t.replace(".NS","")
-                    # Check current portfolio (from cloud)
                     holdings = [p['Symbol'] for p in st.session_state.portfolio]
                     if sym not in holdings:
                         trade = {
@@ -250,12 +270,8 @@ with tab2:
                     closed_trade['PnL'] = pl
                     closed_trade['Result'] = "WIN" if pl > 0 else "LOSS"
                     
-                    # 1. Append to Cloud Journal
                     append_to_journal(closed_trade)
-                    # 2. Update Session State Journal
                     st.session_state.journal.append(closed_trade)
-                    
-                    # 3. Remove from Portfolio & Save Cloud
                     st.session_state.portfolio.pop(i)
                     save_data(st.session_state.portfolio, "Portfolio")
                     st.rerun()
