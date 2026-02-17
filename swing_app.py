@@ -18,36 +18,29 @@ now = datetime.datetime.now(ist)
 
 market_open = datetime.time(9, 15)
 market_close = datetime.time(15, 30)
-# Market is active if Weekday (Mon=0 to Fri=4) AND Time is within 09:15-15:30
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
-# AUTO-REFRESH (30s during market, 60s otherwise)
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_final_v2")
+# AUTO-REFRESH
+st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_timer")
 
 # --- 2. GOOGLE SHEETS DATABASE ENGINE ---
 @st.cache_resource
 def init_google_sheet():
-    """Initialize connection to Google Sheets with caching"""
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
         creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
         client = gspread.authorize(creds)
         return client
-    except Exception as e:
-        return None
+    except Exception as e: return None
 
 def fetch_sheet_data(tab_name):
-    """Safely fetch all records from a specific tab"""
     try:
         client = init_google_sheet()
-        if client:
-            sheet = client.open("Swing_Trading_DB").worksheet(tab_name)
-            return sheet.get_all_records()
+        if client: return client.open("Swing_Trading_DB").worksheet(tab_name).get_all_records()
     except: return []
     return []
 
 def save_portfolio_cloud(data):
-    """Save Active Portfolio to Cloud"""
     try:
         client = init_google_sheet()
         if client:
@@ -57,13 +50,10 @@ def save_portfolio_cloud(data):
                 df = pd.DataFrame(data)
                 sheet.update([df.columns.values.tolist()] + df.values.tolist())
             else:
-                # Keep headers if empty
                 sheet.append_row(["Date", "Symbol", "Ticker", "Qty", "BuyPrice", "StopPrice", "Strategy"])
-    except Exception as e:
-        st.error(f"Cloud Save Error: {e}")
+    except Exception as e: st.error(f"Cloud Save Error: {e}")
 
 def log_trade_journal(trade):
-    """Append a closed trade to the Journal Tab"""
     try:
         client = init_google_sheet()
         if client:
@@ -75,12 +65,14 @@ def log_trade_journal(trade):
                 trade.get("Strategy", "")
             ]
             sheet.append_row(row)
-    except Exception as e:
-        st.error(f"Journal Log Error: {e}")
+    except Exception as e: st.error(f"Journal Log Error: {e}")
 
 # INITIALIZE SESSION STATE
 if 'portfolio' not in st.session_state: st.session_state.portfolio = fetch_sheet_data("Portfolio")
 if 'journal' not in st.session_state: st.session_state.journal = fetch_sheet_data("Journal")
+
+# NEW: SIGNAL HISTORY TRACKER (Tracks when a signal first appeared)
+if 'signal_history' not in st.session_state: st.session_state.signal_history = {}
 
 # --- 3. INDICATORS ---
 def calculate_rsi(series, period=14):
@@ -95,59 +87,41 @@ def calculate_bollinger_width(series, period=20):
     std = series.rolling(window=period).std()
     return ((sma + (2 * std)) - (sma - (2 * std))) / sma
 
-# --- 4. HEADER (Custom Compact Layout) ---
+# --- 4. HEADER ---
 c1, c2 = st.columns([3, 1])
 with c1:
     st.title("☁️ Elite Quant Terminal")
     st.caption("⚡ Google Cloud Database Active")
 with c2:
-    # DIGITAL CLOCK
     status_emoji = "🟢" if is_market_active else "🔴"
     st.metric("Market Time (IST)", f"{now.strftime('%H:%M:%S')}", f"{status_emoji} {'OPEN' if is_market_active else 'CLOSED'}")
 
-# INDICES TICKER TAPE (Smaller Font)
 indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
 cols = st.columns(len(indices))
-
 for i, (name, ticker) in enumerate(indices.items()):
     try:
         df = yf.Ticker(ticker).history(period="5d")
         if not df.empty:
-            curr = df['Close'].iloc[-1]
-            prev = df['Close'].iloc[-2]
+            curr, prev = df['Close'].iloc[-1], df['Close'].iloc[-2]
             pct = ((curr - prev) / prev) * 100
             color = "green" if pct >= 0 else "red"
-            # Using Markdown for smaller font control
-            cols[i].markdown(
-                f"""
-                <div style="border:1px solid #333; padding:10px; border-radius:5px; text-align:center;">
-                    <small>{name}</small><br>
-                    <b style="font-size:18px;">{curr:,.0f}</b><br>
-                    <span style="color:{color}; font-size:14px;">{pct:+.2f}%</span>
-                </div>
-                """, 
-                unsafe_allow_html=True
-            )
+            cols[i].markdown(f"<div style='border:1px solid #333; padding:10px; border-radius:5px; text-align:center;'><small>{name}</small><br><b style='font-size:18px;'>{curr:,.0f}</b><br><span style='color:{color}; font-size:14px;'>{pct:+.2f}%</span></div>", unsafe_allow_html=True)
         else: cols[i].info("Loading...")
     except: cols[i].write("-")
-
 st.divider()
 
 # --- 5. SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Control Panel")
     mode = st.radio("Strategy Mode:", ["🛡️ Swing (Sentinel)", "🎯 Scalp (Sniper)"])
-    
     st.divider()
     st.subheader("🤖 Auto-Bot")
     bot_active = st.checkbox("Enable Auto-Trading", value=False)
     risk_per_trade = st.slider("Risk Per Trade (%)", 0.5, 5.0, 1.5)
-    
     st.divider()
     if st.button("💾 Force Save to Cloud"):
         save_portfolio_cloud(st.session_state.portfolio)
         st.success("Synced!")
-    
     with st.expander("🔧 Diagnostics"):
         show_all = st.checkbox("Show 'WAIT' Stocks", value=True) 
         if st.button("Test DB Connection"):
@@ -174,6 +148,9 @@ with tab1:
         scan_results = []
         nifty_closes = closes['^NSEI'].dropna()
         nifty_perf = nifty_closes.iloc[-1] / nifty_closes.iloc[-60]
+        
+        # Track Active Signals this cycle
+        active_signals = []
 
         for ticker in TICKERS:
             try:
@@ -183,6 +160,7 @@ with tab1:
                 
                 curr_price = series.iloc[-1]
                 status, trigger_price = "⏳ WAIT", 0.0
+                symbol = ticker.replace(".NS", "")
                 
                 if mode == "🛡️ Swing (Sentinel)":
                     high_5d = series.tail(6).iloc[:-1].max()
@@ -193,7 +171,7 @@ with tab1:
                     if curr_price > high_5d and curr_price > sma200 and stock_perf > nifty_perf:
                         status = "🎯 CONFIRMED"
                 
-                else: # Sniper
+                else: 
                     bb_w = calculate_bollinger_width(series).iloc[-1]
                     rsi = calculate_rsi(series).iloc[-1]
                     vol_ma = vol_series.rolling(20).mean().iloc[-1]
@@ -205,11 +183,21 @@ with tab1:
 
                 gap_pct = ((curr_price - trigger_price) / trigger_price) * 100 if trigger_price > 0 else 0
                 
-                # APPEND LOGIC: Always append if confirmed, check box for others
+                # --- SIGNAL TIMING LOGIC ---
+                signal_time = "-"
+                if status in ["🎯 CONFIRMED", "🚀 BREAKOUT"]:
+                    active_signals.append(symbol)
+                    # If new signal, record time
+                    if symbol not in st.session_state.signal_history:
+                        st.session_state.signal_history[symbol] = now.strftime("%H:%M")
+                    signal_time = st.session_state.signal_history[symbol]
+                
+                # APPEND RESULTS
                 if show_all or status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "👀 WATCH (Squeeze)"]:
                     scan_results.append({
-                        "Stock": ticker.replace(".NS", ""),
+                        "Stock": symbol,
                         "Status": status,
+                        "Signal Time": signal_time,
                         "Price": round(curr_price, 2),
                         "Trigger": round(trigger_price, 2),
                         "Gap %": f"{gap_pct:.1f}%"
@@ -218,7 +206,6 @@ with tab1:
                 # BOT LOGIC
                 if bot_active and status in ["🎯 CONFIRMED", "🚀 BREAKOUT"]:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
-                    symbol = ticker.replace(".NS", "")
                     if symbol not in current_holdings:
                         new_trade = {
                             "Date": now.strftime("%Y-%m-%d"), "Symbol": symbol, "Ticker": ticker,
@@ -230,10 +217,15 @@ with tab1:
                         st.toast(f"🤖 Bot Bought: {symbol}")
             except: continue
         
+        # CLEANUP: Remove old signals from history if they are no longer active
+        # This creates the "Survival of the Fittest" effect
+        for s in list(st.session_state.signal_history.keys()):
+            if s not in active_signals:
+                del st.session_state.signal_history[s]
+
         # DISPLAY TABLE
         if scan_results:
             df_scan = pd.DataFrame(scan_results)
-            # Custom Sort: Confirmed > Watch > Wait
             sort_map = {"🎯 CONFIRMED": 0, "🚀 BREAKOUT": 0, "👀 WATCH (Squeeze)": 1, "⏳ WAIT": 2}
             df_scan['Sort'] = df_scan['Status'].map(sort_map)
             df_scan = df_scan.sort_values('Sort').drop('Sort', axis=1)
@@ -270,7 +262,6 @@ with tab2:
             total_val += cur_val
             total_inv += inv_val
             
-            # EXIT LOGIC
             msg, new_sl = "", sl
             if pnl_pct > 3.0 and sl < buy:
                 new_sl = buy
@@ -296,7 +287,6 @@ with tab2:
             if c5.button(f"✅ CLOSE {msg}", key=f"close_{i}"):
                 closed_trade = trade.copy()
                 closed_trade.update({'ExitPrice': price, 'ExitDate': now.strftime("%Y-%m-%d"), 'PnL': pnl, 'Result': "WIN" if pnl > 0 else "LOSS"})
-                
                 log_trade_journal(closed_trade)
                 st.session_state.journal.append(closed_trade)
                 st.session_state.portfolio.pop(i)
@@ -309,8 +299,7 @@ with tab2:
             m1.metric("Total Invested", f"₹{total_inv:,.0f}")
             m2.metric("Current Value", f"₹{total_val:,.0f}")
             m3.metric("Total P&L", f"₹{(total_val-total_inv):,.0f}", f"{((total_val-total_inv)/total_inv)*100:.2f}%")
-    else:
-        st.info("Portfolio Empty. Go to Scanner to find stocks.")
+    else: st.info("Portfolio Empty. Go to Scanner to find stocks.")
 
 # --- TAB 3: ANALYSIS ---
 with tab3:
@@ -340,5 +329,4 @@ with tab3:
         with c2:
             st.write("⚠️ **Top Losers**")
             st.dataframe(df_j.nsmallest(5, 'PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
-    else:
-        st.info("Journal Empty. Close trades to see analysis.")
+    else: st.info("Journal Empty. Close trades to see analysis.")
