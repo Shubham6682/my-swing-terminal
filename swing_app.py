@@ -21,7 +21,7 @@ market_close = datetime.time(15, 30)
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
 # AUTO-REFRESH
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_pro_v2")
+st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_pro_v3")
 
 # --- 2. GOOGLE SHEETS DATABASE ENGINE ---
 @st.cache_resource
@@ -85,13 +85,12 @@ def calculate_bollinger_width(series, period=20):
     std = series.rolling(window=period).std()
     return ((sma + (2 * std)) - (sma - (2 * std))) / sma
 
-# --- 4. DATA FETCHING (OPTIMIZED) ---
+# --- 4. DATA FETCHING ---
 NIFTY_50 = ["ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK", "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BEL", "BPCL", "BHARTIARTL", "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "ITC", "INDUSINDBK", "INFY", "JSWSTEEL", "KOTAKBANK", "LT", "LTIM", "M&M", "MARUTI", "NTPC", "NESTLEIND", "ONGC", "POWERGRID", "RELIANCE", "SBILIFE", "SHRIRAMFIN", "SBIN", "SUNPHARMA", "TCS", "TATACONSUM", "TATAMOTORS", "TATASTEEL", "TECHM", "TITAN", "ULTRACEMCO", "WIPRO"]
 TICKERS = [f"{t}.NS" for t in NIFTY_50]
 
 @st.cache_data(ttl=60)
 def get_market_data():
-    # Fetch extra history for 200 SMA and Vol MA
     data = yf.download(TICKERS + ["^NSEI"], period="1y", threads=False, progress=False)
     return data['Close'], data['Volume']
 
@@ -99,7 +98,7 @@ def get_market_data():
 closes, volumes = get_market_data()
 nifty_closes = closes['^NSEI'].dropna()
 
-# MARKET MOOD CALCULATION (PRIORITY 2)
+# MARKET MOOD CALCULATION
 nifty_sma20 = nifty_closes.rolling(20).mean().iloc[-1]
 nifty_curr = nifty_closes.iloc[-1]
 is_market_bullish = nifty_curr > nifty_sma20
@@ -107,7 +106,6 @@ is_market_bullish = nifty_curr > nifty_sma20
 c1, c2 = st.columns([3, 1])
 with c1:
     st.title("☁️ Elite Quant Terminal")
-    # Dynamic Subheader based on Market Mood
     if is_market_bullish:
         st.success(f"🟢 MARKET MOOD: BULLISH (Nifty > 20 SMA)")
     else:
@@ -158,7 +156,6 @@ with tab1:
     try:
         scan_results = []
         nifty_perf = nifty_closes.iloc[-1] / nifty_closes.iloc[-60]
-        
         active_signals = []
 
         for ticker in TICKERS:
@@ -181,15 +178,10 @@ with tab1:
                     stock_perf = series.iloc[-1] / series.iloc[-60]
                     trigger_price = high_5d
                     
-                    # Core Swing Logic
                     if curr_price > high_5d and curr_price > sma200 and stock_perf > nifty_perf:
-                        if is_market_bullish:
-                            status = "🎯 CONFIRMED"
-                        else:
-                            status = "⛔ MKT WEAK" # Filter 2: Block if market is bearish
-                
+                        if is_market_bullish: status = "🎯 CONFIRMED"
+                        else: status = "⛔ MKT WEAK"
                 else: 
-                    # Scalp Logic (Unchanged)
                     bb_w = calculate_bollinger_width(series).iloc[-1]
                     rsi = calculate_rsi(series).iloc[-1]
                     vol_ma = vol_series.rolling(20).mean().iloc[-1]
@@ -200,42 +192,35 @@ with tab1:
 
                 gap_pct = ((curr_price - trigger_price) / trigger_price) * 100 if trigger_price > 0 else 0
                 
-                # --- SIGNAL TIMING & VOLUME CHECK (PRIORITY 1) ---
+                # --- SIGNAL TIMING & VOLUME ---
                 signal_time = "-"
-                
                 if status in ["🎯 CONFIRMED", "🚀 BREAKOUT"]:
                     active_signals.append(symbol)
                     if symbol not in st.session_state.signal_history:
                         st.session_state.signal_history[symbol] = now.strftime("%H:%M")
                     signal_time = st.session_state.signal_history[symbol]
                     
-                    # "STRONG BUY" LOGIC UPGRADE
-                    # 1. Must be after 3:00 PM
-                    # 2. Must be in list since Morning (< 10 AM)
-                    # 3. MUST HAVE VOLUME > AVG VOLUME (The New Filter)
-                    
                     start_time_obj = datetime.datetime.strptime(signal_time, "%H:%M").time()
                     cutoff_start = datetime.time(10, 0)
                     cutoff_now = datetime.time(15, 0)
                     
                     if now.time() >= cutoff_now and start_time_obj <= cutoff_start:
-                        if curr_vol > vol_sma20: # Volume Check
-                            status = "✅ STRONG BUY"
-                        else:
-                            status = "⚠️ LOW VOL" # Downgrade if price is good but volume is bad
+                        if curr_vol > vol_sma20: status = "✅ STRONG BUY"
+                        else: status = "⚠️ LOW VOL"
 
-                # APPEND RESULTS
+                # APPEND RESULTS (WITH ENTRY PRICE ADDED BACK)
                 if show_all or status not in ["⏳ WAIT"]:
                     scan_results.append({
                         "Stock": symbol,
                         "Status": status,
                         "Signal Time": signal_time,
                         "Price": round(curr_price, 2),
-                        "Vol vs Avg": f"{(curr_vol/vol_sma20)*100:.0f}%", # New Column
+                        "Entry": round(trigger_price, 2), # ADDED BACK HERE
+                        "Vol vs Avg": f"{(curr_vol/vol_sma20)*100:.0f}%",
                         "Gap %": f"{gap_pct:.1f}%"
                     })
                 
-                # BOT LOGIC (Respects Market Mood & Volume)
+                # BOT LOGIC
                 if bot_active and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
                     if symbol not in current_holdings:
