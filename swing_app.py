@@ -15,13 +15,14 @@ st.set_page_config(page_title="Elite Quant Terminal", layout="wide")
 # TIMEZONE & MARKET HOURS
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
+today_str = now.strftime("%Y-%m-%d")
 
 market_open = datetime.time(9, 15)
 market_close = datetime.time(15, 30)
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
 # AUTO-REFRESH
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_clean")
+st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_cloud_sync")
 
 # --- 2. GOOGLE SHEETS DATABASE ENGINE ---
 @st.cache_resource
@@ -39,6 +40,32 @@ def fetch_sheet_data(tab_name):
         if client: return client.open("Swing_Trading_DB").worksheet(tab_name).get_all_records()
     except: return []
     return []
+
+# --- NEW: PERSISTENT SIGNAL LOGGING ---
+def log_signal_cloud(symbol, signal_time):
+    """Writes the breakout time to Google Sheets so we never lose it."""
+    try:
+        client = init_google_sheet()
+        if client:
+            sheet = client.open("Swing_Trading_DB").worksheet("Signal_Log")
+            sheet.append_row([today_str, symbol, signal_time])
+    except Exception as e: pass
+
+def load_signals_from_cloud():
+    """Reads the 'Morning' signals from Google Sheets at startup."""
+    history = {}
+    try:
+        data = fetch_sheet_data("Signal_Log")
+        if data:
+            df = pd.DataFrame(data)
+            # Filter for TODAY only
+            if not df.empty and 'Date' in df.columns:
+                today_data = df[df['Date'] == today_str]
+                # Create dictionary: {Symbol: Time}
+                for _, row in today_data.iterrows():
+                    history[row['Symbol']] = row['Time']
+    except Exception as e: pass
+    return history
 
 def save_portfolio_cloud(data):
     try:
@@ -67,10 +94,13 @@ def log_trade_journal(trade):
             sheet.append_row(row)
     except Exception as e: st.error(f"Journal Log Error: {e}")
 
-# INITIALIZE SESSION STATE
+# INITIALIZE SESSION STATE & SYNC CLOUD HISTORY
 if 'portfolio' not in st.session_state: st.session_state.portfolio = fetch_sheet_data("Portfolio")
 if 'journal' not in st.session_state: st.session_state.journal = fetch_sheet_data("Journal")
-if 'signal_history' not in st.session_state: st.session_state.signal_history = {}
+
+# --- THE FIX: Load history from Cloud on startup ---
+if 'signal_history' not in st.session_state: 
+    st.session_state.signal_history = load_signals_from_cloud()
 
 # --- 3. INDICATORS ---
 def calculate_rsi(series, period=14):
@@ -156,7 +186,9 @@ with tab1:
     try:
         scan_results = []
         nifty_perf = nifty_closes.iloc[-1] / nifty_closes.iloc[-60]
-        active_signals = []
+        
+        # We don't clear history here anymore. We trust the Cloud + Session State.
+        active_symbols_now = []
 
         for ticker in TICKERS:
             try:
@@ -192,19 +224,25 @@ with tab1:
 
                 gap_pct = ((curr_price - trigger_price) / trigger_price) * 100 if trigger_price > 0 else 0
                 
-                # --- SIGNAL TIMING & VOLUME ---
+                # --- SIGNAL LOGGING & GREEN LOGIC ---
                 signal_time = "-"
+                
                 if status in ["🎯 CONFIRMED", "🚀 BREAKOUT"]:
-                    active_signals.append(symbol)
+                    active_symbols_now.append(symbol)
+                    
+                    # 1. NEW SIGNAL? Log to Cloud!
                     if symbol not in st.session_state.signal_history:
-                        st.session_state.signal_history[symbol] = now.strftime("%H:%M")
+                        current_time_str = now.strftime("%H:%M")
+                        st.session_state.signal_history[symbol] = current_time_str
+                        log_signal_cloud(symbol, current_time_str) # <--- SAVES TO SHEET
+                    
                     signal_time = st.session_state.signal_history[symbol]
                     
+                    # 2. GREEN CHECK (Using Cloud Time)
                     start_time_obj = datetime.datetime.strptime(signal_time, "%H:%M").time()
                     cutoff_start = datetime.time(10, 0)
                     cutoff_now = datetime.time(15, 0)
                     
-                    # GREEN SIGNAL LOGIC: Time > 3 PM + Early Signal + High Volume
                     if now.time() >= cutoff_now and start_time_obj <= cutoff_start:
                         if curr_vol > vol_sma20: status = "✅ STRONG BUY"
                         else: status = "⚠️ LOW VOL"
@@ -234,11 +272,6 @@ with tab1:
                         save_portfolio_cloud(st.session_state.portfolio)
                         st.toast(f"🤖 Bot Bought: {symbol}")
             except: continue
-        
-        # CLEANUP
-        for s in list(st.session_state.signal_history.keys()):
-            if s not in active_signals:
-                del st.session_state.signal_history[s]
 
         # DISPLAY TABLE
         if scan_results:
