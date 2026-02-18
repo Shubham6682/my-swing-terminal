@@ -21,7 +21,7 @@ market_close = datetime.time(15, 30)
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
 # AUTO-REFRESH
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_pro")
+st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_pro_v2")
 
 # --- 2. GOOGLE SHEETS DATABASE ENGINE ---
 @st.cache_resource
@@ -67,7 +67,7 @@ def log_trade_journal(trade):
             sheet.append_row(row)
     except Exception as e: st.error(f"Journal Log Error: {e}")
 
-# INITIALIZE SESSION STATE & SIGNAL HISTORY
+# INITIALIZE SESSION STATE
 if 'portfolio' not in st.session_state: st.session_state.portfolio = fetch_sheet_data("Portfolio")
 if 'journal' not in st.session_state: st.session_state.journal = fetch_sheet_data("Journal")
 if 'signal_history' not in st.session_state: st.session_state.signal_history = {}
@@ -85,15 +85,39 @@ def calculate_bollinger_width(series, period=20):
     std = series.rolling(window=period).std()
     return ((sma + (2 * std)) - (sma - (2 * std))) / sma
 
-# --- 4. HEADER ---
+# --- 4. DATA FETCHING (OPTIMIZED) ---
+NIFTY_50 = ["ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK", "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BEL", "BPCL", "BHARTIARTL", "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "ITC", "INDUSINDBK", "INFY", "JSWSTEEL", "KOTAKBANK", "LT", "LTIM", "M&M", "MARUTI", "NTPC", "NESTLEIND", "ONGC", "POWERGRID", "RELIANCE", "SBILIFE", "SHRIRAMFIN", "SBIN", "SUNPHARMA", "TCS", "TATACONSUM", "TATAMOTORS", "TATASTEEL", "TECHM", "TITAN", "ULTRACEMCO", "WIPRO"]
+TICKERS = [f"{t}.NS" for t in NIFTY_50]
+
+@st.cache_data(ttl=60)
+def get_market_data():
+    # Fetch extra history for 200 SMA and Vol MA
+    data = yf.download(TICKERS + ["^NSEI"], period="1y", threads=False, progress=False)
+    return data['Close'], data['Volume']
+
+# --- 5. HEADER & MARKET MOOD ---
+closes, volumes = get_market_data()
+nifty_closes = closes['^NSEI'].dropna()
+
+# MARKET MOOD CALCULATION (PRIORITY 2)
+nifty_sma20 = nifty_closes.rolling(20).mean().iloc[-1]
+nifty_curr = nifty_closes.iloc[-1]
+is_market_bullish = nifty_curr > nifty_sma20
+
 c1, c2 = st.columns([3, 1])
 with c1:
     st.title("☁️ Elite Quant Terminal")
-    st.caption("⚡ Google Cloud Database Active")
+    # Dynamic Subheader based on Market Mood
+    if is_market_bullish:
+        st.success(f"🟢 MARKET MOOD: BULLISH (Nifty > 20 SMA)")
+    else:
+        st.error(f"🔴 MARKET MOOD: BEARISH (Nifty < 20 SMA) - Buying Paused")
+
 with c2:
     status_emoji = "🟢" if is_market_active else "🔴"
     st.metric("Market Time (IST)", f"{now.strftime('%H:%M:%S')}", f"{status_emoji} {'OPEN' if is_market_active else 'CLOSED'}")
 
+# INDICES TICKER
 indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
 cols = st.columns(len(indices))
 for i, (name, ticker) in enumerate(indices.items()):
@@ -104,11 +128,10 @@ for i, (name, ticker) in enumerate(indices.items()):
             pct = ((curr - prev) / prev) * 100
             color = "green" if pct >= 0 else "red"
             cols[i].markdown(f"<div style='border:1px solid #333; padding:10px; border-radius:5px; text-align:center;'><small>{name}</small><br><b style='font-size:18px;'>{curr:,.0f}</b><br><span style='color:{color}; font-size:14px;'>{pct:+.2f}%</span></div>", unsafe_allow_html=True)
-        else: cols[i].info("Loading...")
     except: cols[i].write("-")
 st.divider()
 
-# --- 5. SIDEBAR ---
+# --- 6. SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Control Panel")
     mode = st.radio("Strategy Mode:", ["🛡️ Swing (Sentinel)", "🎯 Scalp (Sniper)"])
@@ -126,15 +149,6 @@ with st.sidebar:
             if init_google_sheet(): st.success("✅ Connected")
             else: st.error("❌ Failed")
 
-# --- 6. DATA FETCHING ---
-NIFTY_50 = ["ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK", "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BEL", "BPCL", "BHARTIARTL", "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "ITC", "INDUSINDBK", "INFY", "JSWSTEEL", "KOTAKBANK", "LT", "LTIM", "M&M", "MARUTI", "NTPC", "NESTLEIND", "ONGC", "POWERGRID", "RELIANCE", "SBILIFE", "SHRIRAMFIN", "SBIN", "SUNPHARMA", "TCS", "TATACONSUM", "TATAMOTORS", "TATASTEEL", "TECHM", "TITAN", "ULTRACEMCO", "WIPRO"]
-TICKERS = [f"{t}.NS" for t in NIFTY_50]
-
-@st.cache_data(ttl=60)
-def get_market_data():
-    data = yf.download(TICKERS + ["^NSEI"], period="1y", threads=False, progress=False)
-    return data['Close'], data['Volume']
-
 # --- 7. TABS ---
 tab1, tab2, tab3 = st.tabs(["🔍 Market Scanner", "💼 Active Portfolio", "📊 Performance Audit"])
 
@@ -142,9 +156,7 @@ tab1, tab2, tab3 = st.tabs(["🔍 Market Scanner", "💼 Active Portfolio", "�
 with tab1:
     scan_placeholder = st.empty()
     try:
-        closes, volumes = get_market_data()
         scan_results = []
-        nifty_closes = closes['^NSEI'].dropna()
         nifty_perf = nifty_closes.iloc[-1] / nifty_closes.iloc[-60]
         
         active_signals = []
@@ -156,23 +168,31 @@ with tab1:
                 if series.empty: continue
                 
                 curr_price = series.iloc[-1]
+                curr_vol = vol_series.iloc[-1]
+                vol_sma20 = vol_series.rolling(20).mean().iloc[-1]
+                
                 status, trigger_price = "⏳ WAIT", 0.0
                 symbol = ticker.replace(".NS", "")
                 
+                # --- STRATEGY ENGINE ---
                 if mode == "🛡️ Swing (Sentinel)":
                     high_5d = series.tail(6).iloc[:-1].max()
                     sma200 = series.rolling(200).mean().iloc[-1]
                     stock_perf = series.iloc[-1] / series.iloc[-60]
                     trigger_price = high_5d
                     
+                    # Core Swing Logic
                     if curr_price > high_5d and curr_price > sma200 and stock_perf > nifty_perf:
-                        status = "🎯 CONFIRMED"
+                        if is_market_bullish:
+                            status = "🎯 CONFIRMED"
+                        else:
+                            status = "⛔ MKT WEAK" # Filter 2: Block if market is bearish
                 
                 else: 
+                    # Scalp Logic (Unchanged)
                     bb_w = calculate_bollinger_width(series).iloc[-1]
                     rsi = calculate_rsi(series).iloc[-1]
                     vol_ma = vol_series.rolling(20).mean().iloc[-1]
-                    
                     if bb_w < 0.10: status = "👀 WATCH (Squeeze)"
                     elif (vol_series.iloc[-1] > vol_ma * 1.5) and rsi > 55:
                         status = "🚀 BREAKOUT"
@@ -180,38 +200,42 @@ with tab1:
 
                 gap_pct = ((curr_price - trigger_price) / trigger_price) * 100 if trigger_price > 0 else 0
                 
-                # --- SIGNAL TIMING LOGIC ---
+                # --- SIGNAL TIMING & VOLUME CHECK (PRIORITY 1) ---
                 signal_time = "-"
-                is_strong = False
                 
                 if status in ["🎯 CONFIRMED", "🚀 BREAKOUT"]:
                     active_signals.append(symbol)
-                    # If new signal, record time
                     if symbol not in st.session_state.signal_history:
                         st.session_state.signal_history[symbol] = now.strftime("%H:%M")
                     signal_time = st.session_state.signal_history[symbol]
                     
-                    # STRENGTH CHECK: If Time > 3:00 PM AND Signal Time < 10:00 AM -> Turn Green
+                    # "STRONG BUY" LOGIC UPGRADE
+                    # 1. Must be after 3:00 PM
+                    # 2. Must be in list since Morning (< 10 AM)
+                    # 3. MUST HAVE VOLUME > AVG VOLUME (The New Filter)
+                    
                     start_time_obj = datetime.datetime.strptime(signal_time, "%H:%M").time()
-                    cutoff_start = datetime.time(10, 0) # 10:00 AM
-                    cutoff_now = datetime.time(15, 0)   # 3:00 PM
+                    cutoff_start = datetime.time(10, 0)
+                    cutoff_now = datetime.time(15, 0)
                     
                     if now.time() >= cutoff_now and start_time_obj <= cutoff_start:
-                        status = "✅ STRONG BUY" # New Special Status
-                        is_strong = True
+                        if curr_vol > vol_sma20: # Volume Check
+                            status = "✅ STRONG BUY"
+                        else:
+                            status = "⚠️ LOW VOL" # Downgrade if price is good but volume is bad
 
                 # APPEND RESULTS
-                if show_all or status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY", "👀 WATCH (Squeeze)"]:
+                if show_all or status not in ["⏳ WAIT"]:
                     scan_results.append({
                         "Stock": symbol,
                         "Status": status,
                         "Signal Time": signal_time,
                         "Price": round(curr_price, 2),
-                        "Trigger": round(trigger_price, 2),
+                        "Vol vs Avg": f"{(curr_vol/vol_sma20)*100:.0f}%", # New Column
                         "Gap %": f"{gap_pct:.1f}%"
                     })
                 
-                # BOT LOGIC
+                # BOT LOGIC (Respects Market Mood & Volume)
                 if bot_active and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
                     if symbol not in current_holdings:
@@ -230,18 +254,20 @@ with tab1:
             if s not in active_signals:
                 del st.session_state.signal_history[s]
 
-        # DISPLAY TABLE WITH HIGHLIGHTS
+        # DISPLAY TABLE
         if scan_results:
             df_scan = pd.DataFrame(scan_results)
-            sort_map = {"✅ STRONG BUY": 0, "🎯 CONFIRMED": 1, "🚀 BREAKOUT": 1, "👀 WATCH (Squeeze)": 2, "⏳ WAIT": 3}
+            sort_map = {"✅ STRONG BUY": 0, "🎯 CONFIRMED": 1, "🚀 BREAKOUT": 1, "⚠️ LOW VOL": 2, "⛔ MKT WEAK": 3, "👀 WATCH (Squeeze)": 4, "⏳ WAIT": 5}
             df_scan['Sort'] = df_scan['Status'].map(sort_map)
             df_scan = df_scan.sort_values('Sort').drop('Sort', axis=1)
             
-            # Use Style to Highlight "STRONG BUY"
-            def highlight_strong(s):
-                return ['background-color: #d4edda; color: #155724' if v == '✅ STRONG BUY' else '' for v in s]
+            def highlight_status(s):
+                if s['Status'] == '✅ STRONG BUY': return ['background-color: #d4edda; color: #155724'] * len(s)
+                elif s['Status'] == '⛔ MKT WEAK': return ['background-color: #f8d7da; color: #721c24'] * len(s)
+                elif s['Status'] == '⚠️ LOW VOL': return ['background-color: #fff3cd; color: #856404'] * len(s)
+                else: return [''] * len(s)
 
-            scan_placeholder.dataframe(df_scan.style.apply(highlight_strong, subset=['Status']), use_container_width=True, hide_index=True)
+            scan_placeholder.dataframe(df_scan.style.apply(highlight_status, axis=1), use_container_width=True, hide_index=True)
         else:
             scan_placeholder.info("Scanner Active. No signals found yet.")
             
