@@ -21,7 +21,7 @@ market_close = datetime.time(15, 30)
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
 # AUTO-REFRESH
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_timer")
+st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_pro")
 
 # --- 2. GOOGLE SHEETS DATABASE ENGINE ---
 @st.cache_resource
@@ -67,11 +67,9 @@ def log_trade_journal(trade):
             sheet.append_row(row)
     except Exception as e: st.error(f"Journal Log Error: {e}")
 
-# INITIALIZE SESSION STATE
+# INITIALIZE SESSION STATE & SIGNAL HISTORY
 if 'portfolio' not in st.session_state: st.session_state.portfolio = fetch_sheet_data("Portfolio")
 if 'journal' not in st.session_state: st.session_state.journal = fetch_sheet_data("Journal")
-
-# NEW: SIGNAL HISTORY TRACKER (Tracks when a signal first appeared)
 if 'signal_history' not in st.session_state: st.session_state.signal_history = {}
 
 # --- 3. INDICATORS ---
@@ -149,7 +147,6 @@ with tab1:
         nifty_closes = closes['^NSEI'].dropna()
         nifty_perf = nifty_closes.iloc[-1] / nifty_closes.iloc[-60]
         
-        # Track Active Signals this cycle
         active_signals = []
 
         for ticker in TICKERS:
@@ -185,15 +182,26 @@ with tab1:
                 
                 # --- SIGNAL TIMING LOGIC ---
                 signal_time = "-"
+                is_strong = False
+                
                 if status in ["🎯 CONFIRMED", "🚀 BREAKOUT"]:
                     active_signals.append(symbol)
                     # If new signal, record time
                     if symbol not in st.session_state.signal_history:
                         st.session_state.signal_history[symbol] = now.strftime("%H:%M")
                     signal_time = st.session_state.signal_history[symbol]
-                
+                    
+                    # STRENGTH CHECK: If Time > 3:00 PM AND Signal Time < 10:00 AM -> Turn Green
+                    start_time_obj = datetime.datetime.strptime(signal_time, "%H:%M").time()
+                    cutoff_start = datetime.time(10, 0) # 10:00 AM
+                    cutoff_now = datetime.time(15, 0)   # 3:00 PM
+                    
+                    if now.time() >= cutoff_now and start_time_obj <= cutoff_start:
+                        status = "✅ STRONG BUY" # New Special Status
+                        is_strong = True
+
                 # APPEND RESULTS
-                if show_all or status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "👀 WATCH (Squeeze)"]:
+                if show_all or status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY", "👀 WATCH (Squeeze)"]:
                     scan_results.append({
                         "Stock": symbol,
                         "Status": status,
@@ -204,7 +212,7 @@ with tab1:
                     })
                 
                 # BOT LOGIC
-                if bot_active and status in ["🎯 CONFIRMED", "🚀 BREAKOUT"]:
+                if bot_active and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
                     if symbol not in current_holdings:
                         new_trade = {
@@ -217,19 +225,23 @@ with tab1:
                         st.toast(f"🤖 Bot Bought: {symbol}")
             except: continue
         
-        # CLEANUP: Remove old signals from history if they are no longer active
-        # This creates the "Survival of the Fittest" effect
+        # CLEANUP
         for s in list(st.session_state.signal_history.keys()):
             if s not in active_signals:
                 del st.session_state.signal_history[s]
 
-        # DISPLAY TABLE
+        # DISPLAY TABLE WITH HIGHLIGHTS
         if scan_results:
             df_scan = pd.DataFrame(scan_results)
-            sort_map = {"🎯 CONFIRMED": 0, "🚀 BREAKOUT": 0, "👀 WATCH (Squeeze)": 1, "⏳ WAIT": 2}
+            sort_map = {"✅ STRONG BUY": 0, "🎯 CONFIRMED": 1, "🚀 BREAKOUT": 1, "👀 WATCH (Squeeze)": 2, "⏳ WAIT": 3}
             df_scan['Sort'] = df_scan['Status'].map(sort_map)
             df_scan = df_scan.sort_values('Sort').drop('Sort', axis=1)
-            scan_placeholder.dataframe(df_scan, use_container_width=True, hide_index=True)
+            
+            # Use Style to Highlight "STRONG BUY"
+            def highlight_strong(s):
+                return ['background-color: #d4edda; color: #155724' if v == '✅ STRONG BUY' else '' for v in s]
+
+            scan_placeholder.dataframe(df_scan.style.apply(highlight_strong, subset=['Status']), use_container_width=True, hide_index=True)
         else:
             scan_placeholder.info("Scanner Active. No signals found yet.")
             
