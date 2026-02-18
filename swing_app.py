@@ -21,7 +21,7 @@ market_close = datetime.time(15, 30)
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
 # AUTO-REFRESH
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_pro_v3")
+st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_clean")
 
 # --- 2. GOOGLE SHEETS DATABASE ENGINE ---
 @st.cache_resource
@@ -98,7 +98,7 @@ def get_market_data():
 closes, volumes = get_market_data()
 nifty_closes = closes['^NSEI'].dropna()
 
-# MARKET MOOD CALCULATION
+# MARKET MOOD
 nifty_sma20 = nifty_closes.rolling(20).mean().iloc[-1]
 nifty_curr = nifty_closes.iloc[-1]
 is_market_bullish = nifty_curr > nifty_sma20
@@ -204,23 +204,24 @@ with tab1:
                     cutoff_start = datetime.time(10, 0)
                     cutoff_now = datetime.time(15, 0)
                     
+                    # GREEN SIGNAL LOGIC: Time > 3 PM + Early Signal + High Volume
                     if now.time() >= cutoff_now and start_time_obj <= cutoff_start:
                         if curr_vol > vol_sma20: status = "✅ STRONG BUY"
                         else: status = "⚠️ LOW VOL"
 
-                # APPEND RESULTS (WITH ENTRY PRICE ADDED BACK)
+                # APPEND RESULTS
                 if show_all or status not in ["⏳ WAIT"]:
                     scan_results.append({
                         "Stock": symbol,
                         "Status": status,
                         "Signal Time": signal_time,
                         "Price": round(curr_price, 2),
-                        "Entry": round(trigger_price, 2), # ADDED BACK HERE
+                        "Entry": round(trigger_price, 2),
                         "Vol vs Avg": f"{(curr_vol/vol_sma20)*100:.0f}%",
                         "Gap %": f"{gap_pct:.1f}%"
                     })
                 
-                # BOT LOGIC
+                # BOT LOGIC (Back to simple 1 Qty)
                 if bot_active and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
                     if symbol not in current_holdings:
