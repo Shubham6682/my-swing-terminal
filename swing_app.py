@@ -22,7 +22,7 @@ market_close = datetime.time(15, 30)
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
 # AUTO-REFRESH (30s Active, 60s Passive)
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_final_v7_safe")
+st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_final_v8_tzfix")
 
 # --- 2. GOOGLE SHEETS DATABASE ENGINE (WITH SAFETY LOCK) ---
 if 'db_connected' not in st.session_state: st.session_state.db_connected = False
@@ -40,17 +40,17 @@ def fetch_sheet_data(tab_name):
     try:
         client = init_google_sheet()
         if client: 
-            st.session_state.db_connected = True # Connection Success
+            st.session_state.db_connected = True 
             return client.open("Swing_Trading_DB").worksheet(tab_name).get_all_records()
     except: 
-        st.session_state.db_connected = False # Connection Failed
+        st.session_state.db_connected = False 
         return []
     st.session_state.db_connected = False
     return []
 
 # --- PERSISTENT SIGNAL LOGGING ---
 def log_signal_cloud(symbol, signal_time):
-    if not st.session_state.db_connected: return # SAFETY LOCK
+    if not st.session_state.db_connected: return 
     try:
         client = init_google_sheet()
         if client:
@@ -74,7 +74,7 @@ def load_signals_from_cloud():
 def save_portfolio_cloud(data):
     if not st.session_state.db_connected: 
         st.error("🚫 CLOUD DISCONNECTED: Cannot Save! Check Internet.")
-        return # SAFETY LOCK: Prevent overwriting with empty data
+        return 
     try:
         client = init_google_sheet()
         if client:
@@ -103,7 +103,6 @@ def log_trade_journal(trade):
     except Exception as e: st.error(f"Journal Log Error: {e}")
 
 # --- INITIALIZE SESSION STATE ---
-# We fetch ONLY if not already loaded, to prevent wiping session state on refresh
 if 'portfolio' not in st.session_state: st.session_state.portfolio = fetch_sheet_data("Portfolio")
 if 'journal' not in st.session_state: st.session_state.journal = fetch_sheet_data("Journal")
 if 'blacklist' not in st.session_state: st.session_state.blacklist = []
@@ -167,7 +166,6 @@ else:
 c1, c2 = st.columns([3, 1])
 with c1:
     st.title("☁️ Elite Quant Terminal")
-    # DB STATUS INDICATOR
     if st.session_state.db_connected: st.caption("✅ Cloud Database: Connected")
     else: st.caption("🚫 Cloud Database: DISCONNECTED (Trading Disabled)")
     
@@ -201,7 +199,6 @@ with st.sidebar:
     st.divider()
     st.subheader("🤖 Auto-Bot")
     
-    # SAFETY LOCK FOR BOT
     if st.session_state.db_connected:
         bot_active = st.checkbox("Enable Auto-Trading", value=False)
     else:
@@ -232,7 +229,6 @@ with tab1:
     try:
         scan_results = []
         nifty_perf = 0.0
-        # SAFETY: Handle Missing Nifty Data gracefully
         if not closes.empty and '^NSEI' in closes.columns:
              nifty_closes = closes['^NSEI'].dropna()
              if not nifty_closes.empty and len(nifty_closes) > 60:
@@ -248,7 +244,6 @@ with tab1:
                 if series.empty: continue
                 
                 curr_price = series.iloc[-1]
-                # SAFETY: Skip if Price is NaN
                 if pd.isna(curr_price): continue
                 
                 curr_vol = vol_series.iloc[-1]
@@ -262,7 +257,6 @@ with tab1:
                     high_5d = series.tail(6).iloc[:-1].max()
                     sma200 = series.rolling(200).mean().iloc[-1]
                     
-                    # SAFETY: Check if we have enough data for 60-day performance
                     if len(series) > 60: stock_perf = series.iloc[-1] / series.iloc[-60]
                     else: stock_perf = 0
                     
@@ -288,7 +282,6 @@ with tab1:
                 if status in ["🎯 CONFIRMED", "🚀 BREAKOUT"]:
                     active_symbols_now.append(symbol)
                     
-                    # FIX: 9:15 AM BARRIER
                     if now.time() >= datetime.time(9, 15):
                         if symbol not in st.session_state.signal_history:
                             current_time_str = now.strftime("%H:%M")
@@ -368,7 +361,7 @@ with tab2:
                 if len(tickers) > 1 and not live_data.empty: price = live_data[trade['Ticker']].dropna().iloc[-1]
                 elif not live_data.empty: price = live_data.dropna().iloc[-1]
                 else: price = trade['BuyPrice']
-                if pd.isna(price): price = trade['BuyPrice'] # Safety fallback
+                if pd.isna(price): price = trade['BuyPrice']
             except: price = trade['BuyPrice']
             
             qty = int(trade['Qty'])
@@ -428,13 +421,17 @@ with tab3:
     if st.session_state.journal:
         df_j = pd.DataFrame(st.session_state.journal)
         
-        # SAFETY: FORCE NUMERIC PnL (Handles string errors)
         df_j['PnL'] = pd.to_numeric(df_j['PnL'], errors='coerce').fillna(0)
         df_j['ExitDate'] = pd.to_datetime(df_j['ExitDate'], errors='coerce')
         
         st.subheader("Weekly Performance")
+        
+        # FIX: REMOVE TIMEZONE BEFORE COMPARING
+        cutoff_date = pd.Timestamp(now).tz_localize(None) - pd.Timedelta(days=7)
+        
         if df_j['ExitDate'].notnull().any():
-            curr_week = df_j[df_j['ExitDate'] > (pd.Timestamp(now) - pd.Timedelta(days=7))]
+            # Filter rows where ExitDate is valid AND greater than cutoff
+            curr_week = df_j[(df_j['ExitDate'].notnull()) & (df_j['ExitDate'] > cutoff_date)]
         else: curr_week = pd.DataFrame()
         
         if not curr_week.empty:
