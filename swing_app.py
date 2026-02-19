@@ -349,8 +349,10 @@ with tab1:
                 elif s['Status'] == '⚠️ LOW VOL': return ['background-color: #fff3cd; color: #856404'] * len(s)
                 else: return [''] * len(s)
             
-            # Hide WAIT stocks unless explicitly wanted (can add toggle back if needed)
-            df_scan = df_scan[df_scan['Status'] != '⏳ WAIT']
+            # Respect the Sidebar Toggle for WAIT stocks
+            if not show_all:
+                df_scan = df_scan[df_scan['Status'] != '⏳ WAIT']
+                
             scan_placeholder.dataframe(df_scan.style.apply(highlight_status, axis=1), use_container_width=True, hide_index=True)
         else: scan_placeholder.info("Scanner Active. No signals found yet.")
     except Exception as e: scan_placeholder.error(f"Scanner Error: {e}")
@@ -493,3 +495,4 @@ with tab3:
                 st.dataframe(losers.nsmallest(5, 'PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
