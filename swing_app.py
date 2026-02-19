@@ -456,6 +456,9 @@ with tab2:
 
 # --- TAB 3: ANALYSIS ---
 with tab3:
+    # ---> ADD THIS ONE LINE RIGHT HERE <---
+    st.write("RAW APP MEMORY:", st.session_state.journal)
+    
     if st.session_state.journal:
         df_j = pd.DataFrame(st.session_state.journal)
         df_j['PnL'] = pd.to_numeric(df_j['PnL'], errors='coerce').fillna(0)
@@ -492,4 +495,5 @@ with tab3:
                 st.dataframe(losers.nsmallest(5, 'PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
 
