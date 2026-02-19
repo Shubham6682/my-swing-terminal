@@ -12,7 +12,6 @@ from streamlit_autorefresh import st_autorefresh
 # --- 1. SYSTEM CONFIGURATION ---
 st.set_page_config(page_title="Elite Quant Terminal", layout="wide")
 
-# TIMEZONE & MARKET HOURS
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 today_str = now.strftime("%Y-%m-%d")
@@ -21,10 +20,9 @@ market_open = datetime.time(9, 15)
 market_close = datetime.time(15, 30)
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
-# AUTO-REFRESH
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_v12_complete")
+st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_v13_complete")
 
-# --- 2. GOOGLE SHEETS DATABASE ENGINE (ROBUST) ---
+# --- 2. GOOGLE SHEETS ENGINE ---
 if 'db_connected' not in st.session_state: st.session_state.db_connected = False
 
 @st.cache_resource
@@ -34,7 +32,7 @@ def init_google_sheet():
         creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
         client = gspread.authorize(creds)
         return client
-    except Exception as e: return None
+    except: return None
 
 def fetch_sheet_data(tab_name):
     try:
@@ -45,25 +43,7 @@ def fetch_sheet_data(tab_name):
     except: 
         st.session_state.db_connected = False 
         return []
-    st.session_state.db_connected = False
     return []
-
-# --- PERSISTENT LOGGING WITH RETRY LOGIC ---
-def safe_write_to_sheet(tab_name, row_data):
-    if not st.session_state.db_connected: return False
-    for attempt in range(3): 
-        try:
-            client = init_google_sheet()
-            if client:
-                sheet = client.open("Swing_Trading_DB").worksheet(tab_name)
-                sheet.append_row(row_data)
-                return True 
-        except Exception as e:
-            time.sleep(1) 
-    return False 
-
-def log_signal_cloud(symbol, signal_time):
-    safe_write_to_sheet("Signal_Log", [today_str, symbol, signal_time])
 
 def save_portfolio_cloud(data):
     if not st.session_state.db_connected: return
@@ -81,27 +61,33 @@ def save_portfolio_cloud(data):
 
 def log_trade_journal(trade):
     if not st.session_state.db_connected: return False
-    row = [
-        trade.get("Date", ""), trade.get("Symbol", ""), trade.get("Ticker", ""),
-        trade.get("Qty", 0), trade.get("BuyPrice", 0.0), trade.get("ExitPrice", 0.0),
-        trade.get("ExitDate", ""), trade.get("PnL", 0.0), trade.get("Result", ""),
-        trade.get("Strategy", "")
-    ]
+    row = [trade.get("Date", ""), trade.get("Symbol", ""), trade.get("Ticker", ""),
+           trade.get("Qty", 0), trade.get("BuyPrice", 0.0), trade.get("ExitPrice", 0.0),
+           trade.get("ExitDate", ""), trade.get("PnL", 0.0), trade.get("Result", ""),
+           trade.get("Strategy", "")]
     try:
         client = init_google_sheet()
         if client:
             sheet = client.open("Swing_Trading_DB").worksheet("Journal")
-            first_row = sheet.row_values(1)
-            if not first_row:
+            if not sheet.row_values(1):
                 headers = ["Date", "Symbol", "Ticker", "Qty", "BuyPrice", "ExitPrice", "ExitDate", "PnL", "Result", "Strategy"]
                 sheet.append_row(headers)
             sheet.append_row(row)
-            return True 
-    except Exception as e:
-        st.error(f"Journal Write Error: {e}")
-        return False 
+            return True
+    except: return False
 
-# --- LOAD DATA ---
+def log_signal_cloud(symbol, signal_time):
+    if not st.session_state.db_connected: return False
+    for attempt in range(3): 
+        try:
+            client = init_google_sheet()
+            if client:
+                sheet = client.open("Swing_Trading_DB").worksheet("Signal_Log")
+                sheet.append_row([today_str, symbol, signal_time])
+                return True 
+        except: time.sleep(1) 
+    return False
+
 def load_signals_from_cloud():
     history = {}
     try:
@@ -115,96 +101,19 @@ def load_signals_from_cloud():
     except: pass
     return history
 
-# --- INITIALIZE SESSION STATE ---
+# --- 3. SESSION STATE ---
 if 'portfolio' not in st.session_state: st.session_state.portfolio = fetch_sheet_data("Portfolio")
 if 'journal' not in st.session_state: st.session_state.journal = fetch_sheet_data("Journal")
 if 'blacklist' not in st.session_state: st.session_state.blacklist = []
 if 'notifications' not in st.session_state: st.session_state.notifications = []
 
-# MIDNIGHT RESET
-if 'last_run_date' not in st.session_state:
+if 'last_run_date' not in st.session_state or st.session_state.last_run_date != today_str:
     st.session_state.last_run_date = today_str
     st.session_state.signal_history = load_signals_from_cloud()
-    st.session_state.blacklist = [] 
+    st.session_state.blacklist = []
     st.session_state.notifications = []
 
-if st.session_state.last_run_date != today_str:
-    st.session_state.last_run_date = today_str
-    st.session_state.signal_history = load_signals_from_cloud()
-    st.session_state.blacklist = [] 
-    st.session_state.notifications = []
-
-# --- 3. INDICATORS ---
-def calculate_rsi(series, period=14):
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-def calculate_bollinger_width(series, period=20):
-    sma = series.rolling(window=period).mean()
-    std = series.rolling(window=period).std()
-    return ((sma + (2 * std)) - (sma - (2 * std))) / sma
-
-# --- 4. DATA FETCHING ---
-NIFTY_50 = ["ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK", "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BEL", "BPCL", "BHARTIARTL", "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "ITC", "INDUSINDBK", "INFY", "JSWSTEEL", "KOTAKBANK", "LT", "LTIM", "M&M", "MARUTI", "NTPC", "NESTLEIND", "ONGC", "POWERGRID", "RELIANCE", "SBILIFE", "SHRIRAMFIN", "SBIN", "SUNPHARMA", "TCS", "TATACONSUM", "TATAMOTORS", "TATASTEEL", "TECHM", "TITAN", "ULTRACEMCO", "WIPRO"]
-TICKERS = [f"{t}.NS" for t in NIFTY_50]
-
-@st.cache_data(ttl=60)
-def get_market_data():
-    try:
-        if now.time() < datetime.time(9, 0): return pd.DataFrame(), pd.DataFrame()
-        data = yf.download(TICKERS + ["^NSEI"], period="1y", threads=False, progress=False)
-        return data['Close'], data['Volume']
-    except: return pd.DataFrame(), pd.DataFrame()
-
-# --- 5. HEADER & MARKET MOOD ---
-closes, volumes = get_market_data()
-is_market_bullish = True 
-market_status_msg = "⚪ MARKET DATA LOADING..."
-
-if not closes.empty and '^NSEI' in closes.columns:
-    nifty_closes = closes['^NSEI'].dropna()
-    if not nifty_closes.empty:
-        nifty_sma20 = nifty_closes.rolling(20).mean().iloc[-1]
-        nifty_curr = nifty_closes.iloc[-1]
-        is_market_bullish = nifty_curr > nifty_sma20
-        market_status_msg = f"🟢 MARKET MOOD: BULLISH" if is_market_bullish else f"🔴 MARKET MOOD: BEARISH (Buying Paused)"
-else:
-    if now.time() < datetime.time(9, 15): market_status_msg = "🌙 PRE-MARKET: Waiting for 9:15 AM..."
-    else: market_status_msg = "⚠️ NIFTY DATA ERROR (Running Safe Mode)"
-
-c1, c2 = st.columns([3, 1])
-with c1:
-    st.title("☁️ Elite Quant Terminal")
-    if st.session_state.db_connected: st.caption("✅ Cloud Database: Connected")
-    else: st.caption("🚫 Cloud Database: DISCONNECTED (Trading Disabled)")
-    
-    if "BULLISH" in market_status_msg: st.success(market_status_msg)
-    elif "BEARISH" in market_status_msg: st.error(market_status_msg)
-    elif "PRE-MARKET" in market_status_msg: st.info(market_status_msg)
-    else: st.warning(market_status_msg)
-
-with c2:
-    status_emoji = "🟢" if is_market_active else "🔴"
-    st.metric("Market Time (IST)", f"{now.strftime('%H:%M:%S')}", f"{status_emoji} {'OPEN' if is_market_active else 'CLOSED'}")
-
-# INDICES TICKER
-indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
-cols = st.columns(len(indices))
-for i, (name, ticker) in enumerate(indices.items()):
-    try:
-        df = yf.Ticker(ticker).history(period="5d")
-        if not df.empty:
-            curr, prev = df['Close'].iloc[-1], df['Close'].iloc[-2]
-            pct = ((curr - prev) / prev) * 100
-            color = "green" if pct >= 0 else "red"
-            cols[i].markdown(f"<div style='border:1px solid #333; padding:10px; border-radius:5px; text-align:center;'><small>{name}</small><br><b style='font-size:18px;'>{curr:,.0f}</b><br><span style='color:{color}; font-size:14px;'>{pct:+.2f}%</span></div>", unsafe_allow_html=True)
-    except: cols[i].write("-")
-st.divider()
-
-# --- 6. SIDEBAR & NOTIFICATIONS ---
+# --- 4. SIDEBAR & NOTIFICATIONS ---
 with st.sidebar:
     st.header("⚙️ Control Panel")
     mode = st.radio("Strategy Mode:", ["🛡️ Swing (Sentinel)", "🎯 Scalp (Sniper)"])
@@ -243,7 +152,84 @@ with st.sidebar:
         st.success("Data reloaded from Cloud!")
         st.rerun()
 
-# --- 7. TABS ---
+    # --- RESTORED DIAGNOSTICS BLOCK ---
+    with st.expander("🔧 Diagnostics"):
+        show_all = st.checkbox("Show 'WAIT' Stocks", value=True) 
+        if st.button("Test DB Connection"):
+            if init_google_sheet(): 
+                st.session_state.db_connected = True
+                st.success("✅ Connected")
+            else: 
+                st.session_state.db_connected = False
+                st.error("❌ Failed")
+
+# --- 5. INDICATORS & MARKET DATA ---
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+def calculate_bollinger_width(series, period=20):
+    sma = series.rolling(window=period).mean()
+    std = series.rolling(window=period).std()
+    return ((sma + (2 * std)) - (sma - (2 * std))) / sma
+
+NIFTY_50 = ["ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK", "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BEL", "BPCL", "BHARTIARTL", "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "ITC", "INDUSINDBK", "INFY", "JSWSTEEL", "KOTAKBANK", "LT", "LTIM", "M&M", "MARUTI", "NTPC", "NESTLEIND", "ONGC", "POWERGRID", "RELIANCE", "SBILIFE", "SHRIRAMFIN", "SBIN", "SUNPHARMA", "TCS", "TATACONSUM", "TATAMOTORS", "TATASTEEL", "TECHM", "TITAN", "ULTRACEMCO", "WIPRO"]
+TICKERS = [f"{t}.NS" for t in NIFTY_50]
+
+@st.cache_data(ttl=60)
+def get_market_data():
+    try:
+        if now.time() < datetime.time(9, 0): return pd.DataFrame(), pd.DataFrame()
+        data = yf.download(TICKERS + ["^NSEI"], period="1y", threads=False, progress=False)
+        return data['Close'], data['Volume']
+    except: return pd.DataFrame(), pd.DataFrame()
+
+closes, volumes = get_market_data()
+is_market_bullish = True 
+market_status_msg = "⚪ MARKET DATA LOADING..."
+
+if not closes.empty and '^NSEI' in closes.columns:
+    nifty_closes = closes['^NSEI'].dropna()
+    if not nifty_closes.empty:
+        nifty_sma20 = nifty_closes.rolling(20).mean().iloc[-1]
+        nifty_curr = nifty_closes.iloc[-1]
+        is_market_bullish = nifty_curr > nifty_sma20
+        market_status_msg = f"🟢 MARKET MOOD: BULLISH" if is_market_bullish else f"🔴 MARKET MOOD: BEARISH (Buying Paused)"
+else:
+    if now.time() < datetime.time(9, 15): market_status_msg = "🌙 PRE-MARKET: Waiting for 9:15 AM..."
+    else: market_status_msg = "⚠️ NIFTY DATA ERROR (Running Safe Mode)"
+
+c1, c2 = st.columns([3, 1])
+with c1:
+    st.title("☁️ Elite Quant Terminal")
+    if st.session_state.db_connected: st.caption("✅ Cloud Database: Connected")
+    else: st.caption("🚫 Cloud Database: DISCONNECTED (Trading Disabled)")
+    if "BULLISH" in market_status_msg: st.success(market_status_msg)
+    elif "BEARISH" in market_status_msg: st.error(market_status_msg)
+    elif "PRE-MARKET" in market_status_msg: st.info(market_status_msg)
+    else: st.warning(market_status_msg)
+
+with c2:
+    status_emoji = "🟢" if is_market_active else "🔴"
+    st.metric("Market Time (IST)", f"{now.strftime('%H:%M:%S')}", f"{status_emoji} {'OPEN' if is_market_active else 'CLOSED'}")
+
+indices = {"Nifty 50": "^NSEI", "Sensex": "^BSESN", "Bank Nifty": "^NSEBANK"}
+cols = st.columns(len(indices))
+for i, (name, ticker) in enumerate(indices.items()):
+    try:
+        df = yf.Ticker(ticker).history(period="5d")
+        if not df.empty:
+            curr, prev = df['Close'].iloc[-1], df['Close'].iloc[-2]
+            pct = ((curr - prev) / prev) * 100
+            color = "green" if pct >= 0 else "red"
+            cols[i].markdown(f"<div style='border:1px solid #333; padding:10px; border-radius:5px; text-align:center;'><small>{name}</small><br><b style='font-size:18px;'>{curr:,.0f}</b><br><span style='color:{color}; font-size:14px;'>{pct:+.2f}%</span></div>", unsafe_allow_html=True)
+    except: cols[i].write("-")
+st.divider()
+
+# --- 6. TABS ---
 tab1, tab2, tab3 = st.tabs(["🔍 Market Scanner", "💼 Active Portfolio", "📊 Performance Audit"])
 
 # --- TAB 1: SCANNER ---
@@ -275,7 +261,6 @@ with tab1:
                 status, trigger_price = "⏳ WAIT", 0.0
                 symbol = ticker.replace(".NS", "")
                 
-                # --- STRATEGY ENGINE ---
                 if mode == "🛡️ Swing (Sentinel)":
                     high_5d = series.tail(6).iloc[:-1].max()
                     sma200 = series.rolling(200).mean().iloc[-1]
@@ -296,6 +281,7 @@ with tab1:
 
                 gap_pct = ((curr_price - trigger_price) / trigger_price) * 100 if trigger_price > 0 else 0
                 
+                signal_time = "-"
                 if status in ["🎯 CONFIRMED", "🚀 BREAKOUT"]:
                     active_symbols_now.append(symbol)
                     if now.time() >= datetime.time(9, 15):
@@ -323,7 +309,6 @@ with tab1:
                     "Gap %": f"{gap_pct:.1f}%"
                 })
                 
-                # AUTO-BUY LOGIC
                 if bot_active and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
                     if symbol not in current_holdings and symbol not in st.session_state.blacklist:
@@ -343,13 +328,14 @@ with tab1:
             sort_map = {"✅ STRONG BUY": 0, "🎯 CONFIRMED": 1, "🚀 BREAKOUT": 1, "⚠️ LOW VOL": 2, "⛔ MKT WEAK": 3, "👀 WATCH (Squeeze)": 4, "⏳ WAIT": 5}
             df_scan['Sort'] = df_scan['Status'].map(sort_map)
             df_scan = df_scan.sort_values('Sort').drop('Sort', axis=1)
+            
             def highlight_status(s):
                 if s['Status'] == '✅ STRONG BUY': return ['background-color: #d4edda; color: #155724'] * len(s)
                 elif s['Status'] == '⛔ MKT WEAK': return ['background-color: #f8d7da; color: #721c24'] * len(s)
                 elif s['Status'] == '⚠️ LOW VOL': return ['background-color: #fff3cd; color: #856404'] * len(s)
                 else: return [''] * len(s)
             
-            # Respect the Sidebar Toggle for WAIT stocks
+            # RESTORED: Respect the Sidebar Toggle for WAIT stocks
             if not show_all:
                 df_scan = df_scan[df_scan['Status'] != '⏳ WAIT']
                 
@@ -391,7 +377,6 @@ with tab2:
             
             msg, new_sl = "", sl
             
-            # Trailing Stop Loss Logic
             if pnl_pct > 3.0 and sl < buy:
                 new_sl = buy
                 msg = "🛡️ RISK FREE"
@@ -407,42 +392,44 @@ with tab2:
                 trade['StopPrice'] = round(new_sl, 2)
                 portfolio_changed = True
             
-            # --- AUTO-SELL EXECUTION ---
+            # AUTO-SELL EXECUTION
+            action_taken = False
+            
             if auto_sell and price <= new_sl:
                 closed_trade = trade.copy()
                 closed_trade.update({'ExitPrice': price, 'ExitDate': now.strftime("%Y-%m-%d"), 'PnL': pnl, 'Result': "WIN" if pnl > 0 else "LOSS"})
                 
                 if log_trade_journal(closed_trade):
-                    st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - AUTO-SOLD: {trade['Symbol']} hit SL at ₹{price:.2f}")
+                    st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - AUTO-SOLD: {trade['Symbol']} at ₹{price:.2f}")
                     st.session_state.journal.append(closed_trade)
                     st.session_state.blacklist.append(trade['Symbol'])
                     portfolio_changed = True
-                    continue # Skips adding to remaining_stocks (effectively deleting it)
+                    action_taken = True
                 else:
                     st.error(f"⚠️ Failed to auto-sell {trade['Symbol']} due to Cloud Error.")
 
-            remaining_stocks.append(trade)
-            
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.write(f"**{trade['Symbol']}**")
-            c2.write(f"Entry: {buy:.2f}")
-            c3.metric("LTP", f"{price:.2f}", f"{pnl_pct:.2f}%")
-            c4.metric("Stop Loss", f"{new_sl:.2f}", help="Auto-Managed")
-            
-            # MANUAL CLOSE BUTTON (Backup)
-            if c5.button(f"✅ CLOSE {msg}", key=f"close_{trade['Symbol']}"):
-                closed_trade = trade.copy()
-                closed_trade.update({'ExitPrice': price, 'ExitDate': now.strftime("%Y-%m-%d"), 'PnL': pnl, 'Result': "WIN" if pnl > 0 else "LOSS"})
+            if not action_taken:
+                c1, c2, c3, c4, c5 = st.columns(5)
+                c1.write(f"**{trade['Symbol']}**")
+                c2.write(f"Entry: {buy:.2f}")
+                c3.metric("LTP", f"{price:.2f}", f"{pnl_pct:.2f}%")
+                c4.metric("Stop Loss", f"{new_sl:.2f}", help="Auto-Managed")
                 
-                if log_trade_journal(closed_trade):
-                    st.session_state.notifications.append(f"👤 {now.strftime('%H:%M')} - MANUALLY CLOSED: {trade['Symbol']} at ₹{price:.2f}")
-                    st.session_state.blacklist.append(trade['Symbol'])
-                    st.session_state.journal.append(closed_trade)
-                    # We need to remove the stock we just appended to remaining_stocks above
-                    remaining_stocks.remove(trade) 
-                    portfolio_changed = True
-                else:
-                    st.error("⚠️ INTERNET ERROR: Trade NOT closed! Please click CLOSE again.")
+                if c5.button(f"✅ CLOSE {msg}", key=f"close_{trade['Symbol']}"):
+                    closed_trade = trade.copy()
+                    closed_trade.update({'ExitPrice': price, 'ExitDate': now.strftime("%Y-%m-%d"), 'PnL': pnl, 'Result': "WIN" if pnl > 0 else "LOSS"})
+                    
+                    if log_trade_journal(closed_trade):
+                        st.session_state.notifications.append(f"👤 {now.strftime('%H:%M')} - MANUALLY CLOSED: {trade['Symbol']} at ₹{price:.2f}")
+                        st.session_state.blacklist.append(trade['Symbol'])
+                        st.session_state.journal.append(closed_trade)
+                        portfolio_changed = True
+                        action_taken = True
+                    else:
+                        st.error("⚠️ INTERNET ERROR: Trade NOT closed! Please click CLOSE again.")
+
+            if not action_taken:
+                remaining_stocks.append(trade)
         
         if portfolio_changed:
             st.session_state.portfolio = remaining_stocks
@@ -495,4 +482,3 @@ with tab3:
                 st.dataframe(losers.nsmallest(5, 'PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
-
