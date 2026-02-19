@@ -22,7 +22,7 @@ market_close = datetime.time(15, 30)
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
 # AUTO-REFRESH
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_v9_audit_fix")
+st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_v10_headers_fix")
 
 # --- 2. GOOGLE SHEETS DATABASE ENGINE (ROBUST) ---
 if 'db_connected' not in st.session_state: st.session_state.db_connected = False
@@ -83,16 +83,37 @@ def save_portfolio_cloud(data):
     except: pass
 
 def log_trade_journal(trade):
-    """Logs closed trade to Journal with Retry."""
+    """Logs closed trade to Journal with Retry & Header Check."""
+    if not st.session_state.db_connected: return
+
+    # DATA ROW
     row = [
         trade.get("Date", ""), trade.get("Symbol", ""), trade.get("Ticker", ""),
         trade.get("Qty", 0), trade.get("BuyPrice", 0.0), trade.get("ExitPrice", 0.0),
         trade.get("ExitDate", ""), trade.get("PnL", 0.0), trade.get("Result", ""),
         trade.get("Strategy", "")
     ]
-    success = safe_write_to_sheet("Journal", row)
-    if not success:
-        st.error("⚠️ Cloud Save Failed! Trade saved locally but not in Excel.")
+    
+    # 1. CHECK IF HEADERS EXIST (The Fix)
+    try:
+        client = init_google_sheet()
+        if client:
+            sheet = client.open("Swing_Trading_DB").worksheet("Journal")
+            
+            # Read just the first row to check if it's empty
+            first_row = sheet.row_values(1)
+            
+            if not first_row:
+                # If empty, write headers first
+                headers = ["Date", "Symbol", "Ticker", "Qty", "BuyPrice", "ExitPrice", "ExitDate", "PnL", "Result", "Strategy"]
+                sheet.append_row(headers)
+            
+            # 2. WRITE THE DATA
+            sheet.append_row(row)
+            return
+            
+    except Exception as e:
+        st.error(f"Journal Write Error: {e}")
 
 # --- LOAD DATA ---
 def load_signals_from_cloud():
@@ -405,7 +426,6 @@ with tab3:
         df_j['PnL'] = pd.to_numeric(df_j['PnL'], errors='coerce').fillna(0)
         df_j['ExitDate'] = pd.to_datetime(df_j['ExitDate'], errors='coerce')
         
-        # --- FIX 1: FILTERING LOGIC ---
         # Don't filter by date anymore. Show ALL trades initially.
         curr_trades = df_j[df_j['ExitDate'].notnull()]
         
@@ -426,7 +446,6 @@ with tab3:
         c1, c2 = st.columns(2)
         with c1:
             st.write("🏆 **Top Winners**")
-            # FIX 3: STRICT WINNER LOGIC (Must be positive)
             winners = df_j[df_j['PnL'] > 0]
             if not winners.empty:
                 st.dataframe(winners.nlargest(5, 'PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
@@ -434,7 +453,6 @@ with tab3:
             
         with c2:
             st.write("⚠️ **Top Losers**")
-            # FIX 3: STRICT LOSER LOGIC (Must be negative)
             losers = df_j[df_j['PnL'] < 0]
             if not losers.empty:
                 st.dataframe(losers.nsmallest(5, 'PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
