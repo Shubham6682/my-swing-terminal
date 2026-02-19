@@ -21,7 +21,7 @@ market_open = datetime.time(9, 15)
 market_close = datetime.time(15, 30)
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_v15_circuit_breaker")
+st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_v16_wide_trail")
 
 # --- 2. GOOGLE SHEETS ENGINE ---
 if 'db_connected' not in st.session_state: st.session_state.db_connected = False
@@ -189,7 +189,6 @@ def get_market_data():
 
 closes, volumes = get_market_data()
 
-# --- NEW 2-TIER MARKET CIRCUIT BREAKER ---
 is_safe_to_buy = False 
 market_status_msg = "⚪ MARKET DATA LOADING..."
 
@@ -202,7 +201,7 @@ if not closes.empty and '^NSEI' in closes.columns:
         
         intraday_pct = ((nifty_curr - nifty_prev) / nifty_prev) * 100
         is_macro_bullish = nifty_curr > nifty_sma20
-        is_bleeding = intraday_pct < -0.3 # Intraday dump filter
+        is_bleeding = intraday_pct < -0.3
         
         is_safe_to_buy = is_macro_bullish and not is_bleeding
         
@@ -276,7 +275,6 @@ with tab1:
                 status, trigger_price = "⏳ WAIT", 0.0
                 symbol = ticker.replace(".NS", "")
                 
-                # --- STRATEGY ENGINE WITH SAFETY LOCKS ---
                 if mode == "🛡️ Swing (Sentinel)":
                     high_5d = series.tail(6).iloc[:-1].max()
                     sma200 = series.rolling(200).mean().iloc[-1]
@@ -395,11 +393,12 @@ with tab2:
             
             msg, new_sl = "", sl
             
-            if pnl_pct > 3.0 and sl < buy:
+            # --- UPGRADED TRAILING STOP LOGIC ---
+            if pnl_pct > 4.0 and sl < buy:
                 new_sl = buy
                 msg = "🛡️ RISK FREE"
-            elif pnl_pct > 5.0:
-                trail = price * 0.98
+            elif pnl_pct > 6.0:
+                trail = price * 0.96  # Wider 4% breathing room to prevent early shakeouts
                 if trail > sl:
                     new_sl = trail
                     msg = "📈 TRAILING"
@@ -493,27 +492,25 @@ with tab3:
             k2.metric("Total Trades", total)
             k3.metric("Win Rate", f"{rate:.1f}%")
             st.bar_chart(curr_trades, x="Symbol", y="PnL")
-            # ---> NEW BUTTON TO CALL ANALYSIS.PY <---
+            
             st.divider()
             if st.button("📊 Run Deep Performance Audit"):
                 run_advanced_audit(df_j)
-            # ---------------------------------------
         else: st.info("No valid trades found in Journal.")
         
         st.divider()
         c1, c2 = st.columns(2)
         with c1:
-            st.write("🏆 **Top Winners**")
+            st.write("🏆 **All Winners**")
             winners = df_j[df_j['PnL'] > 0]
             if not winners.empty:
-                st.dataframe(winners.nlargest(5, 'PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
+                st.dataframe(winners.sort_values('PnL', ascending=False)[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No wins yet.")
             
         with c2:
-            st.write("⚠️ **Top Losers**")
+            st.write("⚠️ **All Losers**")
             losers = df_j[df_j['PnL'] < 0]
             if not losers.empty:
-                st.dataframe(losers.nsmallest(5, 'PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
+                st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
-
