@@ -20,7 +20,7 @@ market_open = datetime.time(9, 15)
 market_close = datetime.time(15, 30)
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_v13_complete")
+st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_v14_clean")
 
 # --- 2. GOOGLE SHEETS ENGINE ---
 if 'db_connected' not in st.session_state: st.session_state.db_connected = False
@@ -39,17 +39,7 @@ def fetch_sheet_data(tab_name):
         client = init_google_sheet()
         if client: 
             st.session_state.db_connected = True 
-            sheet = client.open("Swing_Trading_DB").worksheet(tab_name)
-            
-            # THE FIX: Fetch RAW text values instead of formatted records
-            raw_data = sheet.get_all_values() 
-            
-            # If we have headers (row 0) and data (row 1+)
-            if len(raw_data) > 1:
-                headers = raw_data[0]
-                df = pd.DataFrame(raw_data[1:], columns=headers)
-                return df.to_dict('records')
-            return []
+            return client.open("Swing_Trading_DB").worksheet(tab_name).get_all_records()
     except: 
         st.session_state.db_connected = False 
         return []
@@ -162,7 +152,6 @@ with st.sidebar:
         st.success("Data reloaded from Cloud!")
         st.rerun()
 
-    # --- RESTORED DIAGNOSTICS BLOCK ---
     with st.expander("🔧 Diagnostics"):
         show_all = st.checkbox("Show 'WAIT' Stocks", value=True) 
         if st.button("Test DB Connection"):
@@ -345,7 +334,6 @@ with tab1:
                 elif s['Status'] == '⚠️ LOW VOL': return ['background-color: #fff3cd; color: #856404'] * len(s)
                 else: return [''] * len(s)
             
-            # RESTORED: Respect the Sidebar Toggle for WAIT stocks
             if not show_all:
                 df_scan = df_scan[df_scan['Status'] != '⏳ WAIT']
                 
@@ -402,10 +390,21 @@ with tab2:
                 trade['StopPrice'] = round(new_sl, 2)
                 portfolio_changed = True
             
-            # AUTO-SELL EXECUTION
             action_taken = False
             
-            if auto_sell and price <= new_sl:
+            # --- FIX 1: STRICT DUPLICATE CHECK ---
+            is_already_sold = any(
+                j.get('Symbol') == trade['Symbol'] and str(j.get('ExitDate')) == now.strftime("%Y-%m-%d") 
+                for j in st.session_state.journal
+            )
+
+            if is_already_sold:
+                portfolio_changed = True
+                action_taken = True
+                if trade['Symbol'] not in st.session_state.blacklist:
+                    st.session_state.blacklist.append(trade['Symbol'])
+            
+            elif auto_sell and price <= new_sl:
                 closed_trade = trade.copy()
                 closed_trade.update({'ExitPrice': price, 'ExitDate': now.strftime("%Y-%m-%d"), 'PnL': pnl, 'Result': "WIN" if pnl > 0 else "LOSS"})
                 
@@ -415,8 +414,6 @@ with tab2:
                     st.session_state.blacklist.append(trade['Symbol'])
                     portfolio_changed = True
                     action_taken = True
-                else:
-                    st.error(f"⚠️ Failed to auto-sell {trade['Symbol']} due to Cloud Error.")
 
             if not action_taken:
                 c1, c2, c3, c4, c5 = st.columns(5)
@@ -435,8 +432,6 @@ with tab2:
                         st.session_state.journal.append(closed_trade)
                         portfolio_changed = True
                         action_taken = True
-                    else:
-                        st.error("⚠️ INTERNET ERROR: Trade NOT closed! Please click CLOSE again.")
 
             if not action_taken:
                 remaining_stocks.append(trade)
@@ -456,14 +451,18 @@ with tab2:
 
 # --- TAB 3: ANALYSIS ---
 with tab3:
-    # ---> ADD THIS ONE LINE RIGHT HERE <---
-    st.write("RAW APP MEMORY:", st.session_state.journal)
-    
     if st.session_state.journal:
         df_j = pd.DataFrame(st.session_state.journal)
-        df_j['PnL'] = pd.to_numeric(df_j['PnL'], errors='coerce').fillna(0)
-        df_j['ExitDate'] = pd.to_datetime(df_j['ExitDate'], errors='coerce')
         
+        # --- FIX 2: BULLETPROOF DATA SCRUBBING ---
+        if 'PnL' in df_j.columns:
+            # Strip out spaces, commas, currency symbols, and text before doing math
+            df_j['PnL'] = df_j['PnL'].astype(str).str.replace(r'[₹,a-zA-Z\s]', '', regex=True)
+            df_j['PnL'] = pd.to_numeric(df_j['PnL'], errors='coerce').fillna(0)
+        else:
+            df_j['PnL'] = 0
+
+        df_j['ExitDate'] = pd.to_datetime(df_j['ExitDate'], errors='coerce')
         curr_trades = df_j[df_j['ExitDate'].notnull()]
         
         if not curr_trades.empty:
@@ -495,5 +494,3 @@ with tab3:
                 st.dataframe(losers.nsmallest(5, 'PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
-
-
