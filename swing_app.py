@@ -8,6 +8,7 @@ import time
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from streamlit_autorefresh import st_autorefresh
+from analysis import run_advanced_audit
 
 # --- 1. SYSTEM CONFIGURATION ---
 st.set_page_config(page_title="Elite Quant Terminal", layout="wide")
@@ -492,6 +493,11 @@ with tab3:
             k2.metric("Total Trades", total)
             k3.metric("Win Rate", f"{rate:.1f}%")
             st.bar_chart(curr_trades, x="Symbol", y="PnL")
+            # ---> NEW BUTTON TO CALL ANALYSIS.PY <---
+            st.divider()
+            if st.button("📊 Run Deep Performance Audit"):
+                run_advanced_audit(df_j)
+            # ---------------------------------------
         else: st.info("No valid trades found in Journal.")
         
         st.divider()
@@ -510,3 +516,4 @@ with tab3:
                 st.dataframe(losers.nsmallest(5, 'PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
