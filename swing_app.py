@@ -20,7 +20,7 @@ market_open = datetime.time(9, 15)
 market_close = datetime.time(15, 30)
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_v14_clean")
+st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_v15_circuit_breaker")
 
 # --- 2. GOOGLE SHEETS ENGINE ---
 if 'db_connected' not in st.session_state: st.session_state.db_connected = False
@@ -187,16 +187,30 @@ def get_market_data():
     except: return pd.DataFrame(), pd.DataFrame()
 
 closes, volumes = get_market_data()
-is_market_bullish = True 
+
+# --- NEW 2-TIER MARKET CIRCUIT BREAKER ---
+is_safe_to_buy = False 
 market_status_msg = "⚪ MARKET DATA LOADING..."
 
 if not closes.empty and '^NSEI' in closes.columns:
     nifty_closes = closes['^NSEI'].dropna()
-    if not nifty_closes.empty:
+    if len(nifty_closes) > 20:
         nifty_sma20 = nifty_closes.rolling(20).mean().iloc[-1]
         nifty_curr = nifty_closes.iloc[-1]
-        is_market_bullish = nifty_curr > nifty_sma20
-        market_status_msg = f"🟢 MARKET MOOD: BULLISH" if is_market_bullish else f"🔴 MARKET MOOD: BEARISH (Buying Paused)"
+        nifty_prev = nifty_closes.iloc[-2]
+        
+        intraday_pct = ((nifty_curr - nifty_prev) / nifty_prev) * 100
+        is_macro_bullish = nifty_curr > nifty_sma20
+        is_bleeding = intraday_pct < -0.3 # Intraday dump filter
+        
+        is_safe_to_buy = is_macro_bullish and not is_bleeding
+        
+        if is_bleeding:
+            market_status_msg = f"🔴 CRITICAL: NIFTY BLEEDING ({intraday_pct:.2f}%). ALL BUYING HALTED."
+        elif not is_macro_bullish:
+            market_status_msg = f"🔴 MARKET MOOD: BEARISH (Below 20 SMA). Buying Paused."
+        else:
+            market_status_msg = f"🟢 MARKET MOOD: BULLISH (Up {intraday_pct:.2f}%)"
 else:
     if now.time() < datetime.time(9, 15): market_status_msg = "🌙 PRE-MARKET: Waiting for 9:15 AM..."
     else: market_status_msg = "⚠️ NIFTY DATA ERROR (Running Safe Mode)"
@@ -206,8 +220,9 @@ with c1:
     st.title("☁️ Elite Quant Terminal")
     if st.session_state.db_connected: st.caption("✅ Cloud Database: Connected")
     else: st.caption("🚫 Cloud Database: DISCONNECTED (Trading Disabled)")
-    if "BULLISH" in market_status_msg: st.success(market_status_msg)
-    elif "BEARISH" in market_status_msg: st.error(market_status_msg)
+    if "CRITICAL" in market_status_msg: st.error(market_status_msg)
+    elif "BULLISH" in market_status_msg: st.success(market_status_msg)
+    elif "BEARISH" in market_status_msg: st.warning(market_status_msg)
     elif "PRE-MARKET" in market_status_msg: st.info(market_status_msg)
     else: st.warning(market_status_msg)
 
@@ -260,6 +275,7 @@ with tab1:
                 status, trigger_price = "⏳ WAIT", 0.0
                 symbol = ticker.replace(".NS", "")
                 
+                # --- STRATEGY ENGINE WITH SAFETY LOCKS ---
                 if mode == "🛡️ Swing (Sentinel)":
                     high_5d = series.tail(6).iloc[:-1].max()
                     sma200 = series.rolling(200).mean().iloc[-1]
@@ -267,7 +283,7 @@ with tab1:
                     else: stock_perf = 0
                     trigger_price = high_5d
                     if curr_price > high_5d and curr_price > sma200 and stock_perf > nifty_perf:
-                        if is_market_bullish: status = "🎯 CONFIRMED"
+                        if is_safe_to_buy: status = "🎯 CONFIRMED"
                         else: status = "⛔ MKT WEAK"
                 else: 
                     bb_w = calculate_bollinger_width(series).iloc[-1]
@@ -275,8 +291,11 @@ with tab1:
                     vol_ma = vol_series.rolling(20).mean().iloc[-1]
                     if bb_w < 0.10: status = "👀 WATCH (Squeeze)"
                     elif (vol_series.iloc[-1] > vol_ma * 1.5) and rsi > 55:
-                        status = "🚀 BREAKOUT"
-                        trigger_price = curr_price
+                        if is_safe_to_buy: 
+                            status = "🚀 BREAKOUT"
+                            trigger_price = curr_price
+                        else: 
+                            status = "⛔ MKT WEAK"
 
                 gap_pct = ((curr_price - trigger_price) / trigger_price) * 100 if trigger_price > 0 else 0
                 
@@ -392,7 +411,6 @@ with tab2:
             
             action_taken = False
             
-            # --- FIX 1: STRICT DUPLICATE CHECK ---
             is_already_sold = any(
                 j.get('Symbol') == trade['Symbol'] and str(j.get('ExitDate')) == now.strftime("%Y-%m-%d") 
                 for j in st.session_state.journal
@@ -454,9 +472,7 @@ with tab3:
     if st.session_state.journal:
         df_j = pd.DataFrame(st.session_state.journal)
         
-        # --- FIX 2: BULLETPROOF DATA SCRUBBING ---
         if 'PnL' in df_j.columns:
-            # Strip out spaces, commas, currency symbols, and text before doing math
             df_j['PnL'] = df_j['PnL'].astype(str).str.replace(r'[₹,a-zA-Z\s]', '', regex=True)
             df_j['PnL'] = pd.to_numeric(df_j['PnL'], errors='coerce').fillna(0)
         else:
