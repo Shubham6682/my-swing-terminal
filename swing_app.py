@@ -39,7 +39,17 @@ def fetch_sheet_data(tab_name):
         client = init_google_sheet()
         if client: 
             st.session_state.db_connected = True 
-            return client.open("Swing_Trading_DB").worksheet(tab_name).get_all_records()
+            sheet = client.open("Swing_Trading_DB").worksheet(tab_name)
+            
+            # THE FIX: Fetch RAW text values instead of formatted records
+            raw_data = sheet.get_all_values() 
+            
+            # If we have headers (row 0) and data (row 1+)
+            if len(raw_data) > 1:
+                headers = raw_data[0]
+                df = pd.DataFrame(raw_data[1:], columns=headers)
+                return df.to_dict('records')
+            return []
     except: 
         st.session_state.db_connected = False 
         return []
@@ -482,3 +492,4 @@ with tab3:
                 st.dataframe(losers.nsmallest(5, 'PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
