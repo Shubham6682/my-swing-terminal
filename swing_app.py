@@ -22,7 +22,7 @@ market_close = datetime.time(15, 30)
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
 # AUTO-REFRESH (30s Active, 60s Passive)
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_final_v5")
+st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_refresh_final_v6")
 
 # --- 2. GOOGLE SHEETS DATABASE ENGINE ---
 @st.cache_resource
@@ -57,7 +57,7 @@ def load_signals_from_cloud():
         if data:
             df = pd.DataFrame(data)
             if not df.empty and 'Date' in df.columns:
-                # FIX 1: STRICT DATE FILTER (Prevents Zombie Signals)
+                # STRICT DATE FILTER (Prevents Zombie Signals from yesterday)
                 today_data = df[df['Date'] == today_str]
                 for _, row in today_data.iterrows():
                     history[row['Symbol']] = row['Time']
@@ -95,14 +95,14 @@ def log_trade_journal(trade):
 if 'portfolio' not in st.session_state: st.session_state.portfolio = fetch_sheet_data("Portfolio")
 if 'journal' not in st.session_state: st.session_state.journal = fetch_sheet_data("Journal")
 
-# FIX 2: BLACKLIST (Prevents Instant Re-Buy Loop)
+# BLACKLIST (Prevents Instant Re-Buy Loop)
 if 'blacklist' not in st.session_state: st.session_state.blacklist = []
 
-# FIX 1: MIDNIGHT RESET (Wipes memory if date changes)
+# MIDNIGHT RESET (Wipes memory if date changes)
 if 'last_run_date' not in st.session_state:
     st.session_state.last_run_date = today_str
     st.session_state.signal_history = load_signals_from_cloud()
-    st.session_state.blacklist = [] # Clear blacklist on new day
+    st.session_state.blacklist = [] 
 
 if st.session_state.last_run_date != today_str:
     st.session_state.last_run_date = today_str
@@ -128,8 +128,11 @@ TICKERS = [f"{t}.NS" for t in NIFTY_50]
 
 @st.cache_data(ttl=60)
 def get_market_data():
-    # Fetch data. Handle empty case safely.
     try:
+        # Check if market is open to avoid stale data issues
+        if now.time() < datetime.time(9, 0):
+             return pd.DataFrame(), pd.DataFrame()
+             
         data = yf.download(TICKERS + ["^NSEI"], period="1y", threads=False, progress=False)
         return data['Close'], data['Volume']
     except:
@@ -138,8 +141,8 @@ def get_market_data():
 # --- 5. HEADER & MARKET MOOD ---
 closes, volumes = get_market_data()
 
-# FIX 3: SAFE MARKET MOOD CHECK (Prevents Crash if Yahoo Fails)
-is_market_bullish = True # Default to allow viewing if Nifty fails
+# SAFE MARKET MOOD CHECK (Prevents Crash if Yahoo Fails)
+is_market_bullish = True 
 market_status_msg = "⚪ MARKET DATA LOADING..."
 
 if not closes.empty and '^NSEI' in closes.columns:
@@ -150,13 +153,17 @@ if not closes.empty and '^NSEI' in closes.columns:
         is_market_bullish = nifty_curr > nifty_sma20
         market_status_msg = f"🟢 MARKET MOOD: BULLISH (Nifty > 20 SMA)" if is_market_bullish else f"🔴 MARKET MOOD: BEARISH (Nifty < 20 SMA) - Buying Paused"
 else:
-    market_status_msg = "⚠️ NIFTY DATA ERROR (Check Connection)"
+    if now.time() < datetime.time(9, 15):
+        market_status_msg = "🌙 PRE-MARKET: Waiting for 9:15 AM..."
+    else:
+        market_status_msg = "⚠️ NIFTY DATA ERROR (Check Connection)"
 
 c1, c2 = st.columns([3, 1])
 with c1:
     st.title("☁️ Elite Quant Terminal")
     if "BULLISH" in market_status_msg: st.success(market_status_msg)
     elif "BEARISH" in market_status_msg: st.error(market_status_msg)
+    elif "PRE-MARKET" in market_status_msg: st.info(market_status_msg)
     else: st.warning(market_status_msg)
 
 with c2:
@@ -252,20 +259,25 @@ with tab1:
                 if status in ["🎯 CONFIRMED", "🚀 BREAKOUT"]:
                     active_symbols_now.append(symbol)
                     
-                    if symbol not in st.session_state.signal_history:
-                        current_time_str = now.strftime("%H:%M")
-                        st.session_state.signal_history[symbol] = current_time_str
-                        log_signal_cloud(symbol, current_time_str)
+                    # FIX: THE 9:15 AM BARRIER (Prevents Pre-Market Ghosts)
+                    if now.time() >= datetime.time(9, 15):
+                        if symbol not in st.session_state.signal_history:
+                            current_time_str = now.strftime("%H:%M")
+                            st.session_state.signal_history[symbol] = current_time_str
+                            log_signal_cloud(symbol, current_time_str)
                     
-                    signal_time = st.session_state.signal_history[symbol]
-                    
-                    start_time_obj = datetime.datetime.strptime(signal_time, "%H:%M").time()
-                    cutoff_start = datetime.time(10, 0)
-                    cutoff_now = datetime.time(15, 0)
-                    
-                    if now.time() >= cutoff_now and start_time_obj <= cutoff_start:
-                        if curr_vol > vol_sma20: status = "✅ STRONG BUY"
-                        else: status = "⚠️ LOW VOL"
+                    # Check if signal exists in history (from Cloud or Session)
+                    if symbol in st.session_state.signal_history:
+                        signal_time = st.session_state.signal_history[symbol]
+                        
+                        start_time_obj = datetime.datetime.strptime(signal_time, "%H:%M").time()
+                        cutoff_start = datetime.time(10, 0)
+                        cutoff_now = datetime.time(15, 0)
+                        
+                        # Upgrade to GREEN if criteria met
+                        if now.time() >= cutoff_now and start_time_obj <= cutoff_start:
+                            if curr_vol > vol_sma20: status = "✅ STRONG BUY"
+                            else: status = "⚠️ LOW VOL"
 
                 # APPEND RESULTS
                 if show_all or status not in ["⏳ WAIT"]:
@@ -283,7 +295,6 @@ with tab1:
                 if bot_active and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
                     
-                    # FIX 2: CHECK BLACKLIST
                     if symbol not in current_holdings and symbol not in st.session_state.blacklist:
                         new_trade = {
                             "Date": now.strftime("%Y-%m-%d"), "Symbol": symbol, "Ticker": ticker,
@@ -367,7 +378,7 @@ with tab2:
             c4.metric("Stop Loss", f"{new_sl:.2f}", help="Auto-Managed")
             
             if c5.button(f"✅ CLOSE {msg}", key=f"close_{i}"):
-                # FIX 2: ADD TO BLACKLIST
+                # ADD TO BLACKLIST
                 st.session_state.blacklist.append(trade['Symbol'])
                 
                 closed_trade = trade.copy()
