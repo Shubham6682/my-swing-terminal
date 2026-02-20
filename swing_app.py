@@ -122,7 +122,7 @@ with st.sidebar:
     
     st.subheader("🤖 Auto-Bot")
     if st.session_state.db_connected:
-        bot_active = st.checkbox("Enable Auto-Buying", value=False)
+        bot_active = st.checkbox("Enable Auto-Buying", value=True)
         auto_sell = st.checkbox("Enable Auto-Sell-Off", value=True, help="Automatically sells when SL is hit")
     else:
         st.error("⚠️ Offline: Trading Disabled")
@@ -514,3 +514,4 @@ with tab3:
                 st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
