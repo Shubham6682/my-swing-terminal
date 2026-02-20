@@ -21,7 +21,13 @@ market_open = datetime.time(9, 15)
 market_close = datetime.time(15, 30)
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_v17_timestamps")
+# --- MARKET HOURS REFRESH LOGIC ---
+if is_market_active:
+    # Only loops when the market is physically open
+    st_autorefresh(interval=30000, key="quant_v18_active_only")
+else:
+    # Completely kills the loop after 3:30 PM
+    st.info("🌙 Market is Closed. Auto-refresh is paused to save resources.")
 
 # --- 2. GOOGLE SHEETS ENGINE ---
 if 'db_connected' not in st.session_state: st.session_state.db_connected = False
@@ -533,3 +539,4 @@ with tab3:
                 st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
