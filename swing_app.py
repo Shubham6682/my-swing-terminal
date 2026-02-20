@@ -21,7 +21,7 @@ market_open = datetime.time(9, 15)
 market_close = datetime.time(15, 30)
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
-st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_v16_wide_trail")
+st_autorefresh(interval=30000 if is_market_active else 60000, key="quant_v17_timestamps")
 
 # --- 2. GOOGLE SHEETS ENGINE ---
 if 'db_connected' not in st.session_state: st.session_state.db_connected = False
@@ -57,21 +57,23 @@ def save_portfolio_cloud(data):
                 df = pd.DataFrame(data)
                 sheet.update([df.columns.values.tolist()] + df.values.tolist())
             else:
-                sheet.append_row(["Date", "Symbol", "Ticker", "Qty", "BuyPrice", "StopPrice", "Strategy"])
+                # Updated with EntryTime
+                sheet.append_row(["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "StopPrice", "Strategy"])
     except: pass
 
 def log_trade_journal(trade):
     if not st.session_state.db_connected: return False
-    row = [trade.get("Date", ""), trade.get("Symbol", ""), trade.get("Ticker", ""),
+    # Updated with EntryTime and ExitTime
+    row = [trade.get("Date", ""), trade.get("EntryTime", ""), trade.get("Symbol", ""), trade.get("Ticker", ""),
            trade.get("Qty", 0), trade.get("BuyPrice", 0.0), trade.get("ExitPrice", 0.0),
-           trade.get("ExitDate", ""), trade.get("PnL", 0.0), trade.get("Result", ""),
+           trade.get("ExitDate", ""), trade.get("ExitTime", ""), trade.get("PnL", 0.0), trade.get("Result", ""),
            trade.get("Strategy", "")]
     try:
         client = init_google_sheet()
         if client:
             sheet = client.open("Swing_Trading_DB").worksheet("Journal")
             if not sheet.row_values(1):
-                headers = ["Date", "Symbol", "Ticker", "Qty", "BuyPrice", "ExitPrice", "ExitDate", "PnL", "Result", "Strategy"]
+                headers = ["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "ExitPrice", "ExitDate", "ExitTime", "PnL", "Result", "Strategy"]
                 sheet.append_row(headers)
             sheet.append_row(row)
             return True
@@ -122,6 +124,7 @@ with st.sidebar:
     
     st.subheader("🤖 Auto-Bot")
     if st.session_state.db_connected:
+        # Hardcoded to True for Data Collection Phase
         bot_active = st.checkbox("Enable Auto-Buying", value=True)
         auto_sell = st.checkbox("Enable Auto-Sell-Off", value=True, help="Automatically sells when SL is hit")
     else:
@@ -329,8 +332,11 @@ with tab1:
                 if bot_active and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
                     if symbol not in current_holdings and symbol not in st.session_state.blacklist:
+                        # Updated with EntryTime
                         new_trade = {
-                            "Date": now.strftime("%Y-%m-%d"), "Symbol": symbol, "Ticker": ticker,
+                            "Date": now.strftime("%Y-%m-%d"), 
+                            "EntryTime": now.strftime("%H:%M:%S"),
+                            "Symbol": symbol, "Ticker": ticker,
                             "Qty": 1, "BuyPrice": curr_price,
                             "StopPrice": curr_price * (1 - (risk_per_trade/100)), "Strategy": mode
                         }
@@ -393,12 +399,11 @@ with tab2:
             
             msg, new_sl = "", sl
             
-            # --- UPGRADED TRAILING STOP LOGIC ---
             if pnl_pct > 4.0 and sl < buy:
                 new_sl = buy
                 msg = "🛡️ RISK FREE"
             elif pnl_pct > 6.0:
-                trail = price * 0.96  # Wider 4% breathing room to prevent early shakeouts
+                trail = price * 0.96
                 if trail > sl:
                     new_sl = trail
                     msg = "📈 TRAILING"
@@ -424,7 +429,14 @@ with tab2:
             
             elif auto_sell and price <= new_sl:
                 closed_trade = trade.copy()
-                closed_trade.update({'ExitPrice': price, 'ExitDate': now.strftime("%Y-%m-%d"), 'PnL': pnl, 'Result': "WIN" if pnl > 0 else "LOSS"})
+                # Updated with ExitTime
+                closed_trade.update({
+                    'ExitPrice': price, 
+                    'ExitDate': now.strftime("%Y-%m-%d"), 
+                    'ExitTime': now.strftime("%H:%M:%S"),
+                    'PnL': pnl, 
+                    'Result': "WIN" if pnl > 0 else "LOSS"
+                })
                 
                 if log_trade_journal(closed_trade):
                     st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - AUTO-SOLD: {trade['Symbol']} at ₹{price:.2f}")
@@ -442,7 +454,14 @@ with tab2:
                 
                 if c5.button(f"✅ CLOSE {msg}", key=f"close_{trade['Symbol']}"):
                     closed_trade = trade.copy()
-                    closed_trade.update({'ExitPrice': price, 'ExitDate': now.strftime("%Y-%m-%d"), 'PnL': pnl, 'Result': "WIN" if pnl > 0 else "LOSS"})
+                    # Updated with ExitTime
+                    closed_trade.update({
+                        'ExitPrice': price, 
+                        'ExitDate': now.strftime("%Y-%m-%d"), 
+                        'ExitTime': now.strftime("%H:%M:%S"),
+                        'PnL': pnl, 
+                        'Result': "WIN" if pnl > 0 else "LOSS"
+                    })
                     
                     if log_trade_journal(closed_trade):
                         st.session_state.notifications.append(f"👤 {now.strftime('%H:%M')} - MANUALLY CLOSED: {trade['Symbol']} at ₹{price:.2f}")
@@ -514,4 +533,3 @@ with tab3:
                 st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
-
