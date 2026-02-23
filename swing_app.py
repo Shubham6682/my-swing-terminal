@@ -519,7 +519,16 @@ with tab3:
             st.bar_chart(curr_trades, x="Symbol", y="PnL")
             
             st.divider()
-            if st.button("📊 Run Deep Performance Audit"):
+            # 1. Initialize the memory state if it doesn't exist
+            if 'show_audit' not in st.session_state:
+                st.session_state.show_audit = False
+                
+            # 2. Make the button act as a permanent toggle switch
+            if st.button("📊 Toggle Deep Performance Audit"):
+                st.session_state.show_audit = not st.session_state.show_audit
+                
+            # 3. If the switch is ON, show the audit and keep it open
+            if st.session_state.show_audit:
                 run_advanced_audit(df_j)
         else: st.info("No valid trades found in Journal.")
         
@@ -539,4 +548,5 @@ with tab3:
                 st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
 
