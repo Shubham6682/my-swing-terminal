@@ -54,18 +54,24 @@ def fetch_sheet_data(tab_name):
 
 def save_portfolio_cloud(data):
     if not st.session_state.db_connected: return
+    if data is None: return # Failsafe against empty state
     try:
         client = init_google_sheet()
         if client:
             sheet = client.open("Swing_Trading_DB").worksheet("Portfolio")
-            sheet.clear()
+            
+            # 1. Prepare data FIRST before touching the cloud
             if len(data) > 0:
                 df = pd.DataFrame(data)
-                sheet.update([df.columns.values.tolist()] + df.values.tolist())
+                write_data = [df.columns.values.tolist()] + df.values.tolist()
             else:
-                # Updated with EntryTime
-                sheet.append_row(["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "StopPrice", "Strategy"])
-    except: pass
+                write_data = [["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "StopPrice", "Strategy"]]
+            
+            # 2. Execute as closely together as possible
+            sheet.clear()
+            sheet.update(write_data)
+    except Exception as e:
+        print(f"Cloud Save Error: {e}") # Fails gracefully without breaking app
 
 def log_trade_journal(trade):
     if not st.session_state.db_connected: return False
@@ -548,5 +554,6 @@ with tab3:
                 st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
 
 
