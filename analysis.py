@@ -117,13 +117,19 @@ def run_advanced_audit(journal_df):
                     if not hist_data.empty and tck in hist_data['High'].columns:
                         entry_dt_str = f"{trade['Date']} {trade['EntryTime']}"
                         exit_dt_str = f"{trade['ExitDate']} {trade['ExitTime']}"
+                        
+                        # --- PATCH 2 IS APPLIED HERE ---
                         try:
-                            # Convert to timezone aware to match yfinance index
-                            entry_dt = pd.to_datetime(entry_dt_str).tz_localize('Asia/Kolkata')
-                            exit_dt = pd.to_datetime(exit_dt_str).tz_localize('Asia/Kolkata')
+                            # Strip all timezones to prevent naive/aware collision crashes
+                            entry_dt = pd.to_datetime(entry_dt_str).tz_localize(None)
+                            exit_dt = pd.to_datetime(exit_dt_str).tz_localize(None)
                             
                             ticker_high = hist_data['High'][tck].dropna()
                             ticker_low = hist_data['Low'][tck].dropna()
+                            
+                            # Force the yfinance index to also be naive
+                            ticker_high.index = ticker_high.index.tz_localize(None)
+                            ticker_low.index = ticker_low.index.tz_localize(None)
                             
                             trade_window_high = ticker_high[(ticker_high.index >= entry_dt) & (ticker_high.index <= exit_dt)]
                             trade_window_low = ticker_low[(ticker_low.index >= entry_dt) & (ticker_low.index <= exit_dt)]
@@ -131,6 +137,7 @@ def run_advanced_audit(journal_df):
                             if not trade_window_high.empty: mfe = trade_window_high.max()
                             if not trade_window_low.empty: mae = trade_window_low.min()
                         except: pass 
+                        # --- END OF PATCH 2 ---
                     
                     # Fallback approximations for older trades missing 1m data
                     if mfe == buy_px and exit_px > buy_px: mfe = exit_px
