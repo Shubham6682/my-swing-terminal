@@ -16,11 +16,21 @@ def run_advanced_audit(journal_df):
     df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
     df['ExitDate'] = pd.to_datetime(df['ExitDate'], errors='coerce')
     
+    # --- NEW: TIMEFRAME FILTER ---
+    st.markdown("#### 📅 Select Timeframe")
+    time_filter = st.radio("Analyze Data For:", ["All Time", "Last 7 Days", "Last 30 Days"], horizontal=True)
+    
+    now = pd.Timestamp.now()
+    if time_filter == "Last 7 Days":
+        df = df[df['ExitDate'] >= (now - pd.Timedelta(days=7))]
+    elif time_filter == "Last 30 Days":
+        df = df[df['ExitDate'] >= (now - pd.Timedelta(days=30))]
+    
     # Filter only closed trades
     closed_trades = df[df['ExitDate'].notnull() & (df['Result'] != '')].copy()
     
     if closed_trades.empty:
-        st.warning("Not enough closed trades to run advanced analytics.")
+        st.warning(f"Not enough closed trades in the '{time_filter}' timeframe to run advanced analytics.")
         return
 
     # 2. Crunch the Core Metrics (Level 1)
@@ -50,10 +60,8 @@ def run_advanced_audit(journal_df):
             Avg_PnL=('PnL', 'mean')
         ).reset_index()
         
-        # Format the table for display
         strategy_group['Net_Profit'] = strategy_group['Net_Profit'].apply(lambda x: f"₹{x:,.2f}")
         strategy_group['Avg_PnL'] = strategy_group['Avg_PnL'].apply(lambda x: f"₹{x:,.2f}")
-        
         st.dataframe(strategy_group, use_container_width=True, hide_index=True)
     else:
         st.info("No strategy data found in older trades.")
@@ -90,14 +98,12 @@ def run_advanced_audit(journal_df):
     st.markdown("#### 🚀 Level 2 Analytics: Intraday Excursion (MFE / MAE)")
     st.caption("Reverse-engineers historical 1-minute data to see how much heat your trades took (MAE) and how much profit was left on the table (MFE).")
     
-    # 1. Setup Memory for the Table
     if 'enrichment_run' not in st.session_state:
         st.session_state.enrichment_run = False
         st.session_state.enrichment_data = pd.DataFrame()
 
     c1, c2 = st.columns([1, 1])
     
-    # 2. Button to Run/Refresh the Data
     if c1.button("🔄 Run/Refresh Post-Trade Enrichment"):
         st.session_state.enrichment_run = True
         with st.spinner("Firing up the time machine... Downloading historical 1-minute data..."):
@@ -117,17 +123,13 @@ def run_advanced_audit(journal_df):
                     if not hist_data.empty and tck in hist_data['High'].columns:
                         entry_dt_str = f"{trade['Date']} {trade['EntryTime']}"
                         exit_dt_str = f"{trade['ExitDate']} {trade['ExitTime']}"
-                        
-                        # --- PATCH 2 IS APPLIED HERE ---
                         try:
-                            # Strip all timezones to prevent naive/aware collision crashes
                             entry_dt = pd.to_datetime(entry_dt_str).tz_localize(None)
                             exit_dt = pd.to_datetime(exit_dt_str).tz_localize(None)
                             
                             ticker_high = hist_data['High'][tck].dropna()
                             ticker_low = hist_data['Low'][tck].dropna()
                             
-                            # Force the yfinance index to also be naive
                             ticker_high.index = ticker_high.index.tz_localize(None)
                             ticker_low.index = ticker_low.index.tz_localize(None)
                             
@@ -137,9 +139,7 @@ def run_advanced_audit(journal_df):
                             if not trade_window_high.empty: mfe = trade_window_high.max()
                             if not trade_window_low.empty: mae = trade_window_low.min()
                         except: pass 
-                        # --- END OF PATCH 2 ---
                     
-                    # Fallback approximations for older trades missing 1m data
                     if mfe == buy_px and exit_px > buy_px: mfe = exit_px
                     if mae == buy_px and exit_px < buy_px: mae = exit_px
                     
@@ -154,14 +154,49 @@ def run_advanced_audit(journal_df):
             except Exception as e:
                 st.error(f"Enrichment Failed: {e}")
 
-    # 3. Button to Close/Hide the Table
     if c2.button("❌ Close Enrichment Table"):
         st.session_state.enrichment_run = False
         st.session_state.enrichment_data = pd.DataFrame()
         st.rerun()
 
-    # 4. Display the Cached Table
     if st.session_state.enrichment_run and not st.session_state.enrichment_data.empty:
         st.success("✅ Intraday Enrichment Complete! (Data Cached)")
         st.dataframe(st.session_state.enrichment_data, use_container_width=True, hide_index=True)
-        st.info("💡 **Optimization Insight:** Look at the 'Missed Profit %'. If this number is consistently above 3%, your trailing stop is choking the trades and you are exiting too early.")
+        
+        # --- NEW: AI ACTION PLAN ---
+        st.divider()
+        st.markdown("### 🧠 Automated Quant Conclusion & Action Plan")
+        
+        en_df = st.session_state.enrichment_data.copy()
+        en_df['Missed_Float'] = en_df['Missed Profit %'].str.replace('%', '').astype(float)
+        avg_missed = en_df['Missed_Float'].mean()
+        
+        recommendations = []
+        
+        if avg_missed > 2.5:
+            recommendations.append(f"🔴 **TIGHTEN TRAILING STOP:** You are leaving an average of **{avg_missed:.2f}%** on the table per trade. The 6.0% activation threshold in `swing_app.py` is too wide. **Action:** Consider tightening the trailing threshold to lock in profits earlier.")
+        elif avg_missed < 1.0:
+            recommendations.append(f"🟢 **TRAILING STOP HEALTHY:** You are only leaving **{avg_missed:.2f}%** on the table. Your trailing engine is catching the peaks perfectly. Do not touch it.")
+        else:
+            recommendations.append(f"🟡 **TRAILING STOP ACCEPTABLE:** You are leaving **{avg_missed:.2f}%** on the table. This is normal market breathing room. No changes required.")
+
+        if 'time_stats' in locals() and not time_stats.empty:
+            try:
+                time_stats['Win_Float'] = time_stats['Win_Rate'].str.replace('%', '').astype(float)
+                worst_time = time_stats.loc[time_stats['Win_Float'].idxmin()]
+                best_time = time_stats.loc[time_stats['Win_Float'].idxmax()]
+                
+                if worst_time['Win_Float'] < 30.0 and worst_time['Trades'] >= 3:
+                    recommendations.append(f"🔴 **IMPLEMENT TIME LOCK:** The **{worst_time['Time_Zone']}** session has a toxic win rate of {worst_time['Win_Rate']}. **Action:** Consider blocking new buys during this window.")
+            except: pass
+            
+        if win_rate < 40.0 and rr_ratio < 1.5:
+            recommendations.append(f"🔴 **SYSTEM BLEEDING:** Win rate is {win_rate:.1f}% and Reward-to-Risk is only {rr_ratio:.2f}. **Action:** You must widen your Initial Stop Loss, you are getting chopped out by normal volatility.")
+        elif win_rate >= 50.0 and rr_ratio >= 1.5:
+            recommendations.append(f"🟢 **SYSTEM HIGHLY PROFITABLE:** The math is heavily in your favor. Maintain current risk parameters.")
+
+        for rec in recommendations:
+            st.markdown(rec)
+            
+        if not recommendations:
+            st.info("Gathering more data. The engine needs a few more closed trades to generate a statistically significant action plan.")
