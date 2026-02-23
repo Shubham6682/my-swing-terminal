@@ -376,7 +376,6 @@ with tab1:
             scan_placeholder.dataframe(df_scan.style.apply(highlight_status, axis=1), use_container_width=True, hide_index=True)
         else: scan_placeholder.info("Scanner Active. No signals found yet.")
     except Exception as e: scan_placeholder.error(f"Scanner Error: {e}")
-
 # --- TAB 2: PORTFOLIO & AUTO-EXIT ---
 with tab2:
     if st.session_state.portfolio:
@@ -388,6 +387,14 @@ with tab2:
         total_val, total_inv = 0, 0
         portfolio_changed = False
         remaining_stocks = []
+        
+        # --- NEW DASHBOARD VARIABLES ---
+        today_pnl = 0.0
+        today_count = 0
+        winners = 0
+        losers = 0
+        today_str = now.strftime("%Y-%m-%d") 
+        # -------------------------------
         
         for i, trade in enumerate(st.session_state.portfolio):
             try:
@@ -408,6 +415,15 @@ with tab2:
             
             total_val += cur_val
             total_inv += inv_val
+            
+            # --- NEW DASHBOARD MATH ---
+            if pnl > 0: winners += 1
+            elif pnl < 0: losers += 1
+            
+            if str(trade.get('Date')) == today_str:
+                today_pnl += pnl
+                today_count += 1
+            # --------------------------
             
             msg, new_sl = "", sl
             
@@ -490,12 +506,24 @@ with tab2:
             save_portfolio_cloud(st.session_state.portfolio)
             st.rerun()
 
+        # --- UPGRADED LIVE HEALTH DASHBOARD ---
         st.divider()
         if total_inv > 0:
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Total Invested", f"₹{total_inv:,.0f}")
-            m2.metric("Current Value", f"₹{total_val:,.0f}")
-            m3.metric("Total P&L", f"₹{(total_val-total_inv):,.0f}", f"{((total_val-total_inv)/total_inv)*100:.2f}%")
+            st.markdown("### 📊 Live Portfolio Health")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total Capital Deployed", f"₹{total_inv:,.2f}")
+            
+            total_floating_pnl = total_val - total_inv
+            total_roi_pct = (total_floating_pnl / total_inv) * 100 if total_inv > 0 else 0.0
+            c2.metric("Total Floating PnL", f"₹{total_floating_pnl:,.2f}", f"{total_roi_pct:.2f}% Overall")
+            
+            if today_pnl >= 0:
+                c3.metric(f"Today's PnL ({today_count} trades)", f"₹{today_pnl:,.2f}", "📈 Sourced Today")
+            else:
+                c3.metric(f"Today's PnL ({today_count} trades)", f"₹{today_pnl:,.2f}", "📉 Sourced Today")
+                
+            c4.metric("Live Market Heat", f"{winners} Green / {losers} Red", border=True)
+        # --------------------------------------
     else: st.info("Portfolio Empty. Go to Scanner to find stocks.")
 
 # --- TAB 3: ANALYSIS ---
@@ -554,6 +582,7 @@ with tab3:
                 st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
 
 
 
