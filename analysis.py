@@ -41,7 +41,7 @@ def run_advanced_audit(journal_df):
     
     st.divider()
 
-    # 2.5 Strategy Showdown (The Restored Feature!)
+    # 2.5 Strategy Showdown
     st.markdown("#### ⚔️ Strategy Showdown")
     if 'Strategy' in closed_trades.columns:
         strategy_group = closed_trades.groupby('Strategy').agg(
@@ -90,29 +90,33 @@ def run_advanced_audit(journal_df):
     st.markdown("#### 🚀 Level 2 Analytics: Intraday Excursion (MFE / MAE)")
     st.caption("Reverse-engineers historical 1-minute data to see how much heat your trades took (MAE) and how much profit was left on the table (MFE).")
     
-    if st.button("🔄 Run Post-Trade Enrichment (Downloads Historical Data)"):
+    # 1. Setup Memory for the Table
+    if 'enrichment_run' not in st.session_state:
+        st.session_state.enrichment_run = False
+        st.session_state.enrichment_data = pd.DataFrame()
+
+    c1, c2 = st.columns([1, 1])
+    
+    # 2. Button to Run/Refresh the Data
+    if c1.button("🔄 Run/Refresh Post-Trade Enrichment"):
+        st.session_state.enrichment_run = True
         with st.spinner("Firing up the time machine... Downloading historical 1-minute data..."):
             try:
                 tickers = closed_trades['Ticker'].dropna().unique().tolist()
-                
-                # Download 7 days of 1-minute data 
                 hist_data = yf.download(tickers, period="7d", interval="1m", progress=False, threads=True)
                 
                 enriched_results = []
-                
                 for _, trade in closed_trades.iterrows():
                     sym = trade['Symbol']
                     tck = trade['Ticker']
                     buy_px = float(trade['BuyPrice'])
                     exit_px = float(trade['ExitPrice'])
                     
-                    mfe = buy_px
-                    mae = buy_px
+                    mfe, mae = buy_px, buy_px
                     
                     if not hist_data.empty and tck in hist_data['High'].columns:
                         entry_dt_str = f"{trade['Date']} {trade['EntryTime']}"
                         exit_dt_str = f"{trade['ExitDate']} {trade['ExitTime']}"
-                        
                         try:
                             # Convert to timezone aware to match yfinance index
                             entry_dt = pd.to_datetime(entry_dt_str).tz_localize('Asia/Kolkata')
@@ -124,34 +128,33 @@ def run_advanced_audit(journal_df):
                             trade_window_high = ticker_high[(ticker_high.index >= entry_dt) & (ticker_high.index <= exit_dt)]
                             trade_window_low = ticker_low[(ticker_low.index >= entry_dt) & (ticker_low.index <= exit_dt)]
                             
-                            if not trade_window_high.empty:
-                                mfe = trade_window_high.max()
-                            if not trade_window_low.empty:
-                                mae = trade_window_low.min()
-                        except:
-                            pass 
+                            if not trade_window_high.empty: mfe = trade_window_high.max()
+                            if not trade_window_low.empty: mae = trade_window_low.min()
+                        except: pass 
                     
-                    # Fallback approximations for older trades
+                    # Fallback approximations for older trades missing 1m data
                     if mfe == buy_px and exit_px > buy_px: mfe = exit_px
                     if mae == buy_px and exit_px < buy_px: mae = exit_px
                     
                     left_on_table_pct = ((mfe - exit_px) / buy_px) * 100 if mfe > exit_px else 0.0
                     
                     enriched_results.append({
-                        "Date": trade['Date'],
-                        "Symbol": sym,
-                        "Entry": f"₹{buy_px:,.2f}",
-                        "Exit": f"₹{exit_px:,.2f}",
-                        "Peak Price (MFE)": f"₹{mfe:,.2f}",
-                        "Lowest Dip (MAE)": f"₹{mae:,.2f}",
-                        "Missed Profit %": f"{max(0, left_on_table_pct):.2f}%"
+                        "Date": trade['Date'], "Symbol": sym, "Entry": f"₹{buy_px:,.2f}",
+                        "Exit": f"₹{exit_px:,.2f}", "Peak Price (MFE)": f"₹{mfe:,.2f}",
+                        "Lowest Dip (MAE)": f"₹{mae:,.2f}", "Missed Profit %": f"{max(0, left_on_table_pct):.2f}%"
                     })
-                
-                en_df = pd.DataFrame(enriched_results)
-                st.success("✅ Intraday Enrichment Complete!")
-                st.dataframe(en_df, use_container_width=True, hide_index=True)
-                
-                st.info("💡 **Optimization Insight:** Look at the 'Missed Profit %'. If this number is consistently above 3%, your trailing stop is choking the trades and you are exiting too early. Look at 'Lowest Dip (MAE)' to see if you can safely tighten your initial Stop Loss.")
-                
+                st.session_state.enrichment_data = pd.DataFrame(enriched_results)
             except Exception as e:
-                st.error(f"Enrichment Failed. Ensure Yahoo Finance is accessible. Error: {e}")
+                st.error(f"Enrichment Failed: {e}")
+
+    # 3. Button to Close/Hide the Table
+    if c2.button("❌ Close Enrichment Table"):
+        st.session_state.enrichment_run = False
+        st.session_state.enrichment_data = pd.DataFrame()
+        st.rerun()
+
+    # 4. Display the Cached Table
+    if st.session_state.enrichment_run and not st.session_state.enrichment_data.empty:
+        st.success("✅ Intraday Enrichment Complete! (Data Cached)")
+        st.dataframe(st.session_state.enrichment_data, use_container_width=True, hide_index=True)
+        st.info("💡 **Optimization Insight:** Look at the 'Missed Profit %'. If this number is consistently above 3%, your trailing stop is choking the trades and you are exiting too early.")
