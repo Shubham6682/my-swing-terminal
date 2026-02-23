@@ -19,6 +19,11 @@ def run_advanced_audit(journal_df):
     # --- NEW: TIMEFRAME FILTER ---
     st.markdown("#### 📅 Select Timeframe")
     time_filter = st.radio("Analyze Data For:", ["All Time", "Last 7 Days", "Last 30 Days"], horizontal=True)
+    # Wipe the cached Action Plan if the timeframe changes
+    if 'current_filter' not in st.session_state or st.session_state.current_filter != time_filter:
+        st.session_state.enrichment_run = False
+        st.session_state.enrichment_data = pd.DataFrame()
+        st.session_state.current_filter = time_filter
     
     now = pd.Timestamp.now()
     if time_filter == "Last 7 Days":
