@@ -431,15 +431,16 @@ with tab2:
                 new_sl = buy
                 msg = "🛡️ RISK FREE"
             elif pnl_pct > 6.0:
-                trail = price * 0.96
+                trail = round(price * 0.96, 2)
                 if trail > sl:
                     new_sl = trail
                     msg = "📈 TRAILING"
             
             if price <= new_sl: msg = "❌ STOP HIT"
             
+            new_sl = round(new_sl, 2)
             if new_sl != sl:
-                trade['StopPrice'] = round(new_sl, 2)
+                trade['StopPrice'] = new_sl
                 portfolio_changed = True
             
             action_taken = False
@@ -582,6 +583,7 @@ with tab3:
                 st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
 
 
 
