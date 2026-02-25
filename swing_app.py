@@ -23,10 +23,8 @@ is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_c
 
 # --- MARKET HOURS REFRESH LOGIC ---
 if is_market_active:
-    # Only loops when the market is physically open
     st_autorefresh(interval=30000, key="quant_v18_active_only")
 else:
-    # Completely kills the loop after 3:30 PM
     st.info("🌙 Market is Closed. Auto-refresh is paused to save resources.")
 
 # --- 2. GOOGLE SHEETS ENGINE ---
@@ -54,28 +52,23 @@ def fetch_sheet_data(tab_name):
 
 def save_portfolio_cloud(data):
     if not st.session_state.db_connected: return
-    if data is None: return # Failsafe against empty state
+    if data is None: return
     try:
         client = init_google_sheet()
         if client:
             sheet = client.open("Swing_Trading_DB").worksheet("Portfolio")
-            
-            # 1. Prepare data FIRST before touching the cloud
             if len(data) > 0:
                 df = pd.DataFrame(data)
                 write_data = [df.columns.values.tolist()] + df.values.tolist()
             else:
                 write_data = [["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "StopPrice", "Strategy"]]
-            
-            # 2. Execute as closely together as possible
             sheet.clear()
             sheet.update(write_data)
     except Exception as e:
-        print(f"Cloud Save Error: {e}") # Fails gracefully without breaking app
+        print(f"Cloud Save Error: {e}")
 
 def log_trade_journal(trade):
     if not st.session_state.db_connected: return False
-    # Updated with EntryTime and ExitTime
     row = [trade.get("Date", ""), trade.get("EntryTime", ""), trade.get("Symbol", ""), trade.get("Ticker", ""),
            trade.get("Qty", 0), trade.get("BuyPrice", 0.0), trade.get("ExitPrice", 0.0),
            trade.get("ExitDate", ""), trade.get("ExitTime", ""), trade.get("PnL", 0.0), trade.get("Result", ""),
@@ -265,6 +258,7 @@ with tab1:
     scan_placeholder = st.empty()
     try:
         scan_results = []
+        new_trades_added = False
         nifty_perf = 0.0
         if not closes.empty and '^NSEI' in closes.columns:
              nifty_closes = closes['^NSEI'].dropna()
@@ -331,11 +325,8 @@ with tab1:
                             else: status = "⚠️ LOW VOL"
 
                 scan_results.append({
-                    "Stock": symbol,
-                    "Status": status,
-                    "Signal Time": signal_time,
-                    "Price": round(curr_price, 2),
-                    "Entry": round(trigger_price, 2),
+                    "Stock": symbol, "Status": status, "Signal Time": signal_time,
+                    "Price": round(curr_price, 2), "Entry": round(trigger_price, 2),
                     "Vol vs Avg": f"{(curr_vol/vol_sma20)*100:.0f}%" if vol_sma20 > 0 else "0%",
                     "Gap %": f"{gap_pct:.1f}%"
                 })
@@ -344,14 +335,12 @@ with tab1:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
                     if symbol not in current_holdings and symbol not in st.session_state.blacklist:
                         new_trade = {
-                            "Date": now.strftime("%Y-%m-%d"), 
-                            "EntryTime": now.strftime("%H:%M:%S"),
-                            "Symbol": symbol, "Ticker": ticker,
-                            "Qty": 1, "BuyPrice": curr_price,
+                            "Date": now.strftime("%Y-%m-%d"), "EntryTime": now.strftime("%H:%M:%S"),
+                            "Symbol": symbol, "Ticker": ticker, "Qty": 1, "BuyPrice": curr_price,
                             "StopPrice": curr_price * (1 - (risk_per_trade/100)), "Strategy": mode
                         }
                         st.session_state.portfolio.append(new_trade)
-                        save_portfolio_cloud(st.session_state.portfolio)
+                        new_trades_added = True
                         st.session_state.notifications.append(f"🟢 {now.strftime('%H:%M')} - BOT BOUGHT: {symbol} at ₹{curr_price:.2f}")
                         st.toast(f"🤖 Bot Bought: {symbol}")
             except: continue
@@ -368,10 +357,12 @@ with tab1:
                 elif s['Status'] == '⚠️ LOW VOL': return ['background-color: #fff3cd; color: #856404'] * len(s)
                 else: return [''] * len(s)
             
-            if not show_all:
-                df_scan = df_scan[df_scan['Status'] != '⏳ WAIT']
-                
+            if not show_all: df_scan = df_scan[df_scan['Status'] != '⏳ WAIT']
             scan_placeholder.dataframe(df_scan.style.apply(highlight_status, axis=1), use_container_width=True, hide_index=True)
+            
+            # --- GOOGLE SHEETS API FIX: Save only once per scan cycle ---
+            if bot_active and new_trades_added:
+                save_portfolio_cloud(st.session_state.portfolio)
         else: scan_placeholder.info("Scanner Active. No signals found yet.")
     except Exception as e: scan_placeholder.error(f"Scanner Error: {e}")
 
@@ -387,17 +378,13 @@ with tab2:
         portfolio_changed = False
         remaining_stocks = []
         
-        # --- NEW DASHBOARD VARIABLES ---
         today_pnl = 0.0
         today_count = 0
         winners = 0
         losers = 0
         today_str = now.strftime("%Y-%m-%d") 
-        # -------------------------------
         
         for i, trade in enumerate(st.session_state.portfolio):
-            
-            # --- 1. SAFE PRICE FETCHING (THE GLITCH SHIELD) ---
             api_glitch = False
             try:
                 if len(tickers) > 1 and not live_data.empty: price = live_data[trade['Ticker']].dropna().iloc[-1]
@@ -424,7 +411,6 @@ with tab2:
             total_val += cur_val
             total_inv += inv_val
             
-            # --- NEW DASHBOARD MATH ---
             if not api_glitch:
                 if pnl > 0: winners += 1
                 elif pnl < 0: losers += 1
@@ -435,14 +421,15 @@ with tab2:
             
             msg, new_sl = "", sl
             
-            # --- UPDATED TRAILING MATH (NO INFINITE LOOPS) ---
+            # --- TRAILING STOP "1-LOOP LAG" FIX ---
             if not api_glitch:
                 if pnl_pct > 4.0 and sl < buy:
                     new_sl = buy
                     msg = "🛡️ RISK FREE"
-                elif pnl_pct > 6.0:
+                
+                if pnl_pct > 6.0:
                     trail = round(price * 0.96, 2)
-                    if trail > sl:
+                    if trail > new_sl:
                         new_sl = trail
                         msg = "📈 TRAILING"
                 
@@ -466,14 +453,11 @@ with tab2:
                 if trade['Symbol'] not in st.session_state.blacklist:
                     st.session_state.blacklist.append(trade['Symbol'])
             
-            # --- GLITCH SHIELD: Only auto-sell if API is stable ---
             elif auto_sell and not api_glitch and (price <= new_sl):
                 closed_trade = trade.copy()
                 closed_trade.update({
-                    'ExitPrice': price, 
-                    'ExitDate': now.strftime("%Y-%m-%d"), 
-                    'ExitTime': now.strftime("%H:%M:%S"),
-                    'PnL': pnl, 
+                    'ExitPrice': price, 'ExitDate': now.strftime("%Y-%m-%d"), 
+                    'ExitTime': now.strftime("%H:%M:%S"), 'PnL': pnl, 
                     'Result': "WIN" if pnl > 0 else "LOSS"
                 })
                 
@@ -489,20 +473,16 @@ with tab2:
                 c1.write(f"**{trade['Symbol']}**")
                 c2.write(f"Entry: {buy:.2f}")
                 
-                if api_glitch:
-                    c3.metric("LTP", "API Syncing...", "Holding...")
-                else:
-                    c3.metric("LTP", f"{price:.2f}", f"{pnl_pct:.2f}%")
+                if api_glitch: c3.metric("LTP", "API Syncing...", "Holding...")
+                else: c3.metric("LTP", f"{price:.2f}", f"{pnl_pct:.2f}%")
                     
                 c4.metric("Stop Loss", f"{new_sl:.2f}", help="Auto-Managed")
                 
                 if c5.button(f"✅ CLOSE {msg}", key=f"close_{trade['Symbol']}", disabled=api_glitch):
                     closed_trade = trade.copy()
                     closed_trade.update({
-                        'ExitPrice': price, 
-                        'ExitDate': now.strftime("%Y-%m-%d"), 
-                        'ExitTime': now.strftime("%H:%M:%S"),
-                        'PnL': pnl, 
+                        'ExitPrice': price, 'ExitDate': now.strftime("%Y-%m-%d"), 
+                        'ExitTime': now.strftime("%H:%M:%S"), 'PnL': pnl, 
                         'Result': "WIN" if pnl > 0 else "LOSS"
                     })
                     
@@ -521,7 +501,6 @@ with tab2:
             save_portfolio_cloud(st.session_state.portfolio)
             st.rerun()
 
-        # --- UPGRADED LIVE HEALTH DASHBOARD ---
         st.divider()
         if total_inv > 0:
             st.markdown("### 📊 Live Portfolio Health")
@@ -532,13 +511,10 @@ with tab2:
             total_roi_pct = (total_floating_pnl / total_inv) * 100 if total_inv > 0 else 0.0
             c2.metric("Total Floating PnL", f"₹{total_floating_pnl:,.2f}", f"{total_roi_pct:.2f}% Overall")
             
-            if today_pnl >= 0:
-                c3.metric(f"Today's PnL ({today_count} trades)", f"₹{today_pnl:,.2f}", "📈 Sourced Today")
-            else:
-                c3.metric(f"Today's PnL ({today_count} trades)", f"₹{today_pnl:,.2f}", "📉 Sourced Today")
+            if today_pnl >= 0: c3.metric(f"Today's PnL ({today_count} trades)", f"₹{today_pnl:,.2f}", "📈 Sourced Today")
+            else: c3.metric(f"Today's PnL ({today_count} trades)", f"₹{today_pnl:,.2f}", "📉 Sourced Today")
                 
             c4.metric("Live Market Heat", f"{winners} Green / {losers} Red", border=True)
-        # --------------------------------------
     else: st.info("Portfolio Empty. Go to Scanner to find stocks.")
 
 # --- TAB 3: ANALYSIS ---
