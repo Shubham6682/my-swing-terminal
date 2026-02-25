@@ -26,7 +26,7 @@ def run_advanced_audit(journal_df):
         st.session_state.enrichment_data = pd.DataFrame()
         st.session_state.current_filter = time_filter
 
-    now = pd.Timestamp.now()
+    now = pd.Timestamp.now(tz='Asia/Kolkata').tz_localize(None)
     if time_filter == "Last 7 Days":
         df = df[df['ExitDate'] >= (now - pd.Timedelta(days=7))]
     elif time_filter == "Last 30 Days":
