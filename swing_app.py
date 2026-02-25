@@ -397,12 +397,21 @@ with tab2:
         # -------------------------------
         
         for i, trade in enumerate(st.session_state.portfolio):
+            
+            # --- 1. SAFE PRICE FETCHING (THE GLITCH FIX) ---
+            api_glitch = False
             try:
                 if len(tickers) > 1 and not live_data.empty: price = live_data[trade['Ticker']].dropna().iloc[-1]
                 elif not live_data.empty: price = live_data.dropna().iloc[-1]
-                else: price = trade['BuyPrice']
-                if pd.isna(price): price = trade['BuyPrice']
-            except: price = trade['BuyPrice']
+                else: 
+                    price = float(trade['BuyPrice'])
+                    api_glitch = True
+                if pd.isna(price): 
+                    price = float(trade['BuyPrice'])
+                    api_glitch = True
+            except: 
+                price = float(trade['BuyPrice'])
+                api_glitch = True
             
             qty = int(trade['Qty'])
             buy = float(trade['BuyPrice'])
@@ -416,32 +425,33 @@ with tab2:
             total_val += cur_val
             total_inv += inv_val
             
-            # --- NEW DASHBOARD MATH ---
-            if pnl > 0: winners += 1
-            elif pnl < 0: losers += 1
+            if not api_glitch:
+                if pnl > 0: winners += 1
+                elif pnl < 0: losers += 1
             
             if str(trade.get('Date')) == today_str:
                 today_pnl += pnl
                 today_count += 1
-            # --------------------------
             
             msg, new_sl = "", sl
             
-            if pnl_pct > 4.0 and sl < buy:
-                new_sl = buy
-                msg = "🛡️ RISK FREE"
-            elif pnl_pct > 6.0:
-                trail = round(price * 0.96, 2)
-                if trail > sl:
-                    new_sl = trail
-                    msg = "📈 TRAILING"
-            
-            if price <= new_sl: msg = "❌ STOP HIT"
-            
-            new_sl = round(new_sl, 2)
-            if new_sl != sl:
-                trade['StopPrice'] = new_sl
-                portfolio_changed = True
+            # Only update trailing logic if the API didn't glitch
+            if not api_glitch:
+                if pnl_pct > 4.0 and sl < buy:
+                    new_sl = buy
+                    msg = "🛡️ RISK FREE"
+                elif pnl_pct > 6.0:
+                    trail = round(price * 0.96, 2)
+                    if trail > sl:
+                        new_sl = trail
+                        msg = "📈 TRAILING"
+                
+                if price <= new_sl: msg = "❌ STOP HIT"
+                
+                new_sl = round(new_sl, 2)
+                if new_sl != sl:
+                    trade['StopPrice'] = new_sl
+                    portfolio_changed = True
             
             action_taken = False
             
@@ -456,9 +466,9 @@ with tab2:
                 if trade['Symbol'] not in st.session_state.blacklist:
                     st.session_state.blacklist.append(trade['Symbol'])
             
-            elif auto_sell and price <= new_sl:
+            # --- THE GLITCH SHIELD: Will not auto-sell if API timed out ---
+            elif auto_sell and not api_glitch and (price <= new_sl):
                 closed_trade = trade.copy()
-                # Updated with ExitTime
                 closed_trade.update({
                     'ExitPrice': price, 
                     'ExitDate': now.strftime("%Y-%m-%d"), 
@@ -478,12 +488,18 @@ with tab2:
                 c1, c2, c3, c4, c5 = st.columns(5)
                 c1.write(f"**{trade['Symbol']}**")
                 c2.write(f"Entry: {buy:.2f}")
-                c3.metric("LTP", f"{price:.2f}", f"{pnl_pct:.2f}%")
+                
+                # Display safe UI
+                if api_glitch:
+                    c3.metric("LTP", "API Syncing...", "Holding...")
+                else:
+                    c3.metric("LTP", f"{price:.2f}", f"{pnl_pct:.2f}%")
+                    
                 c4.metric("Stop Loss", f"{new_sl:.2f}", help="Auto-Managed")
                 
-                if c5.button(f"✅ CLOSE {msg}", key=f"close_{trade['Symbol']}"):
+                # Button safely disabled during a glitch
+                if c5.button(f"✅ CLOSE {msg}", key=f"close_{trade['Symbol']}", disabled=api_glitch):
                     closed_trade = trade.copy()
-                    # Updated with ExitTime
                     closed_trade.update({
                         'ExitPrice': price, 
                         'ExitDate': now.strftime("%Y-%m-%d"), 
@@ -506,6 +522,26 @@ with tab2:
             st.session_state.portfolio = remaining_stocks
             save_portfolio_cloud(st.session_state.portfolio)
             st.rerun()
+
+        # --- UPGRADED LIVE HEALTH DASHBOARD ---
+        st.divider()
+        if total_inv > 0:
+            st.markdown("### 📊 Live Portfolio Health")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total Capital Deployed", f"₹{total_inv:,.2f}")
+            
+            total_floating_pnl = total_val - total_inv
+            total_roi_pct = (total_floating_pnl / total_inv) * 100 if total_inv > 0 else 0.0
+            c2.metric("Total Floating PnL", f"₹{total_floating_pnl:,.2f}", f"{total_roi_pct:.2f}% Overall")
+            
+            if today_pnl >= 0:
+                c3.metric(f"Today's PnL ({today_count} trades)", f"₹{today_pnl:,.2f}", "📈 Sourced Today")
+            else:
+                c3.metric(f"Today's PnL ({today_count} trades)", f"₹{today_pnl:,.2f}", "📉 Sourced Today")
+                
+            c4.metric("Live Market Heat", f"{winners} Green / {losers} Red", border=True)
+        # --------------------------------------
+    else: st.info("Portfolio Empty. Go to Scanner to find stocks.")
 
         # --- UPGRADED LIVE HEALTH DASHBOARD ---
         st.divider()
@@ -583,6 +619,7 @@ with tab3:
                 st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
 
 
 
