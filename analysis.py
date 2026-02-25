@@ -20,19 +20,19 @@ def run_advanced_audit(journal_df):
     st.markdown("#### 📅 Select Timeframe")
     time_filter = st.radio("Analyze Data For:", ["All Time", "Last 7 Days", "Last 30 Days"], horizontal=True)
     
-    # Wipe the cached Action Plan if the timeframe changes to prevent desync
     if 'current_filter' not in st.session_state or st.session_state.current_filter != time_filter:
         st.session_state.enrichment_run = False
         st.session_state.enrichment_data = pd.DataFrame()
         st.session_state.current_filter = time_filter
 
+    # --- CLOUD TIMEZONE FIX ---
     now = pd.Timestamp.now(tz='Asia/Kolkata').tz_localize(None)
+    
     if time_filter == "Last 7 Days":
         df = df[df['ExitDate'] >= (now - pd.Timedelta(days=7))]
     elif time_filter == "Last 30 Days":
         df = df[df['ExitDate'] >= (now - pd.Timedelta(days=30))]
     
-    # Filter only closed trades
     closed_trades = df[df['ExitDate'].notnull() & (df['Result'] != '')].copy()
     
     if closed_trades.empty:
@@ -72,7 +72,7 @@ def run_advanced_audit(journal_df):
 
     st.divider()
 
-    # 3. Time-of-Day Optimization (Filtered for "Unknown" trades)
+    # 3. Time-of-Day Optimization
     st.markdown("#### ⏱️ Time-of-Day Optimization")
     time_data = closed_trades[closed_trades['EntryTime'].notnull() & (closed_trades['EntryTime'] != '')].copy()
     
@@ -126,7 +126,12 @@ def run_advanced_audit(journal_df):
                     
                     if not hist_data.empty and tck in hist_data['High'].columns:
                         try:
-                            entry_dt = pd.to_datetime(f"{trade['Date']} {trade['EntryTime']}").tz_localize(None)
+                            # --- TIME MACHINE CRASH FIX ---
+                            if pd.isna(trade.get('EntryTime')) or trade.get('EntryTime') == '':
+                                entry_dt = pd.to_datetime(trade['Date']).tz_localize(None)
+                            else:
+                                entry_dt = pd.to_datetime(f"{trade['Date']} {trade['EntryTime']}").tz_localize(None)
+                                
                             exit_dt = pd.to_datetime(f"{trade['ExitDate']} {trade['ExitTime']}").tz_localize(None)
                             
                             t_high = hist_data['High'][tck].dropna()
