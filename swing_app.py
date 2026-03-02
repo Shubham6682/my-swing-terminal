@@ -61,7 +61,8 @@ def save_portfolio_cloud(data):
                 df = pd.DataFrame(data)
                 write_data = [df.columns.values.tolist()] + df.values.tolist()
             else:
-                write_data = [["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "StopPrice", "Strategy"]]
+                # 🟢 AI UPGRADE: Added AI Feature headers to fallback empty portfolio
+                write_data = [["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "StopPrice", "Strategy", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist"]]
             sheet.clear()
             sheet.update(write_data)
     except Exception as e:
@@ -69,16 +70,21 @@ def save_portfolio_cloud(data):
 
 def log_trade_journal(trade):
     if not st.session_state.db_connected: return False
-    row = [trade.get("Date", ""), trade.get("EntryTime", ""), trade.get("Symbol", ""), trade.get("Ticker", ""),
-           trade.get("Qty", 0), trade.get("BuyPrice", 0.0), trade.get("ExitPrice", 0.0),
-           trade.get("ExitDate", ""), trade.get("ExitTime", ""), trade.get("PnL", 0.0), trade.get("Result", ""),
-           trade.get("Strategy", "")]
+    # 🟢 AI UPGRADE: Inject the 5 new Market Context features into the Journal row
+    row = [
+        trade.get("Date", ""), trade.get("EntryTime", ""), trade.get("Symbol", ""), trade.get("Ticker", ""),
+        trade.get("Qty", 0), trade.get("BuyPrice", 0.0), trade.get("ExitPrice", 0.0),
+        trade.get("ExitDate", ""), trade.get("ExitTime", ""), trade.get("PnL", 0.0), trade.get("Result", ""),
+        trade.get("Strategy", ""), trade.get("VIX", 0.0), trade.get("Nifty_Trend", 0.0),
+        trade.get("RVol", 0.0), trade.get("RSI", 0.0), trade.get("SMA200_Dist", 0.0)
+    ]
     try:
         client = init_google_sheet()
         if client:
             sheet = client.open("Swing_Trading_DB").worksheet("Journal")
             if not sheet.row_values(1):
-                headers = ["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "ExitPrice", "ExitDate", "ExitTime", "PnL", "Result", "Strategy"]
+                # 🟢 AI UPGRADE: Expand Journal headers
+                headers = ["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "ExitPrice", "ExitDate", "ExitTime", "PnL", "Result", "Strategy", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist"]
                 sheet.append_row(headers)
             sheet.append_row(row)
             return True
@@ -190,7 +196,8 @@ TICKERS = [f"{t}.NS" for t in NIFTY_50]
 def get_market_data():
     try:
         if now.time() < datetime.time(9, 0): return pd.DataFrame(), pd.DataFrame()
-        data = yf.download(TICKERS + ["^NSEI"], period="1y", threads=False, progress=False)
+        # 🟢 AI UPGRADE: Appended ^INDIAVIX to pull the Fear Gauge
+        data = yf.download(TICKERS + ["^NSEI", "^INDIAVIX"], period="1y", threads=False, progress=False)
         return data['Close'], data['Volume']
     except: return pd.DataFrame(), pd.DataFrame()
 
@@ -334,11 +341,28 @@ with tab1:
                 if bot_active and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
                     if symbol not in current_holdings and symbol not in st.session_state.blacklist:
+                        
+                        # 🟢 AI UPGRADE: Calculate environment features right before executing buy
+                        try: curr_vix = round(float(closes['^INDIAVIX'].dropna().iloc[-1]), 2)
+                        except: curr_vix = 15.0 
+                        
+                        rvol = round(float(curr_vol / vol_sma20), 2) if vol_sma20 > 0 else 1.0
+                        rsi_val = round(float(calculate_rsi(series).iloc[-1]), 2)
+                        
+                        sma200 = series.rolling(200).mean().iloc[-1]
+                        dist_sma200 = round(float(((curr_price - sma200) / sma200) * 100), 2) if sma200 > 0 else 0.0
+                        
+                        nifty_trend = round(float(intraday_pct), 2) if 'intraday_pct' in locals() else 0.0
+
                         new_trade = {
                             "Date": now.strftime("%Y-%m-%d"), "EntryTime": now.strftime("%H:%M:%S"),
                             "Symbol": symbol, "Ticker": ticker, "Qty": 1, "BuyPrice": curr_price,
-                            "StopPrice": curr_price * (1 - (risk_per_trade/100)), "Strategy": mode
+                            "StopPrice": curr_price * (1 - (risk_per_trade/100)), "Strategy": mode,
+                            # 🧠 SILENT AI FEATURES
+                            "VIX": curr_vix, "Nifty_Trend": nifty_trend, "RVol": rvol,
+                            "RSI": rsi_val, "SMA200_Dist": dist_sma200
                         }
+                        
                         st.session_state.portfolio.append(new_trade)
                         new_trades_added = True
                         st.session_state.notifications.append(f"🟢 {now.strftime('%H:%M')} - BOT BOUGHT: {symbol} at ₹{curr_price:.2f}")
@@ -360,7 +384,6 @@ with tab1:
             if not show_all: df_scan = df_scan[df_scan['Status'] != '⏳ WAIT']
             scan_placeholder.dataframe(df_scan.style.apply(highlight_status, axis=1), use_container_width=True, hide_index=True)
             
-            # --- GOOGLE SHEETS API FIX: Save only once per scan cycle ---
             if bot_active and new_trades_added:
                 save_portfolio_cloud(st.session_state.portfolio)
         else: scan_placeholder.info("Scanner Active. No signals found yet.")
@@ -421,7 +444,6 @@ with tab2:
             
             msg, new_sl = "", sl
             
-            # --- TRAILING STOP "1-LOOP LAG" FIX ---
             if not api_glitch:
                 if pnl_pct > 4.0 and sl < buy:
                     new_sl = buy
