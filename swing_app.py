@@ -282,8 +282,8 @@ with tab1:
                 try:
                     c_data = yf.download(custom_ticker, period="1y", progress=False, threads=False)
                     if not c_data.empty and 'Close' in c_data.columns and 'Volume' in c_data.columns:
-                        c_closes = c_data['Close'].dropna()
-                        c_vols = c_data['Volume'].dropna()
+                        c_closes = c_data['Close'].squeeze().dropna()
+                        c_vols = c_data['Volume'].squeeze().dropna()
                         
                         if len(c_closes) > 60:
                             # 1. Pull current data
@@ -651,4 +651,5 @@ with tab3:
                 st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
 
