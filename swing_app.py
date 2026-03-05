@@ -271,6 +271,65 @@ with tab1:
              nifty_closes = closes['^NSEI'].dropna()
              if not nifty_closes.empty and len(nifty_closes) > 60:
                 nifty_perf = nifty_closes.iloc[-1] / nifty_closes.iloc[-60]
+                 # --- 🟢 NEW: CUSTOM WATCHLIST ANALYZER ---
+        st.markdown("### 🔍 Custom Watchlist Analyzer")
+        c_input = st.text_input("Type any NSE Ticker to test the math (e.g., ZOMATO, RVNL, SUZLON):", "").strip().upper()
+        
+        if c_input:
+            custom_sym = c_input.replace('.NS', '')
+            custom_ticker = f"{custom_sym}.NS"
+            with st.spinner(f"Running quant engine on {custom_sym}..."):
+                try:
+                    c_data = yf.download(custom_ticker, period="1y", progress=False, threads=False)
+                    if not c_data.empty and 'Close' in c_data.columns and 'Volume' in c_data.columns:
+                        c_closes = c_data['Close'].dropna()
+                        c_vols = c_data['Volume'].dropna()
+                        
+                        if len(c_closes) > 60:
+                            # 1. Pull current data
+                            c_curr_price = float(c_closes.iloc[-1])
+                            c_curr_vol = float(c_vols.iloc[-1])
+                            c_vol_sma20 = float(c_vols.rolling(20).mean().iloc[-1])
+                            c_rsi = float(calculate_rsi(c_closes).iloc[-1])
+                            
+                            c_status, c_trigger = "⏳ WAIT", 0.0
+                            
+                            # 2. Run the strategy math
+                            if mode == "🛡️ Swing (Sentinel)":
+                                c_high_5d = c_closes.tail(6).iloc[:-1].max()
+                                c_sma200 = c_closes.rolling(200).mean().iloc[-1]
+                                c_perf = c_closes.iloc[-1] / c_closes.iloc[-60]
+                                c_trigger = c_high_5d
+                                
+                                if c_curr_price > c_high_5d and c_curr_price > c_sma200 and c_perf > nifty_perf:
+                                    c_status = "🎯 CONFIRMED" if is_safe_to_buy else "⛔ MKT WEAK"
+                            else:
+                                c_bb_w = calculate_bollinger_width(c_closes).iloc[-1]
+                                if c_bb_w < 0.10: c_status = "👀 WATCH (Squeeze)"
+                                elif (c_curr_vol > c_vol_sma20 * 1.5) and c_rsi > 55:
+                                    if is_safe_to_buy: 
+                                        c_status = "🚀 BREAKOUT"
+                                        c_trigger = c_curr_price
+                                    else: c_status = "⛔ MKT WEAK"
+                            
+                            # 3. Draw the Results Card
+                            bg_color = "#d4edda" if c_status in ["🎯 CONFIRMED", "🚀 BREAKOUT"] else ("#fff3cd" if c_status == "👀 WATCH (Squeeze)" else "#f8f9fa")
+                            border_color = "#28a745" if c_status in ["🎯 CONFIRMED", "🚀 BREAKOUT"] else ("#ffeeba" if c_status == "👀 WATCH (Squeeze)" else "#6c757d")
+                            vol_surge = (c_curr_vol / c_vol_sma20) * 100 if c_vol_sma20 > 0 else 0
+                            
+                            st.markdown(f"""
+                            <div style='border: 2px solid {border_color}; border-radius: 8px; padding: 15px; background-color: {bg_color}; color: #333;'>
+                                <h4 style='margin-top:0px; color: #111;'>{custom_sym} System Diagnostics</h4>
+                                <b>Signal:</b> {c_status} &nbsp;|&nbsp; <b>LTP:</b> ₹{c_curr_price:.2f} &nbsp;|&nbsp; <b>Target/Entry:</b> ₹{c_trigger:.2f}<br>
+                                <b>RSI:</b> {c_rsi:.1f} &nbsp;|&nbsp; <b>Volume Surge:</b> {vol_surge:.0f}%
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else: st.warning(f"Not enough historical data to calculate 200 SMA on {custom_sym}.")
+                    else: st.error("Invalid Ticker. Make sure it's an NSE stock.")
+                except Exception as e: st.error(f"Error evaluating {custom_sym}: {e}")
+        
+        st.divider()
+        # --- END CUSTOM ANALYZER ---
 
         active_symbols_now = []
 
@@ -592,3 +651,4 @@ with tab3:
                 st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
