@@ -90,7 +90,7 @@ def log_trade_journal(trade):
             return True
     except: return False
 
-def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix):
+def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist):
     if not st.session_state.db_connected: return False
     for attempt in range(3): 
         try:
@@ -98,11 +98,10 @@ def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix):
             if client:
                 sheet = client.open("Swing_Trading_DB").worksheet("Signal_Log")
                 if not sheet.row_values(1):
-                    # Fallback headers just in case
-                    headers = ["Date", "Symbol", "Time", "Status", "Nifty_Trend", "VIX"]
+                    headers = ["Date", "Symbol", "Time", "Status", "Nifty_Trend", "VIX", "RVol", "RSI", "SMA200_Dist"]
                     sheet.append_row(headers)
-                # 🟢 AI UPGRADE: Writing the full context to the Signal Log
-                sheet.append_row([today_str, symbol, signal_time, status, nifty_trend, vix])
+                # 🟢 FULL AI PARITY: Logging the complete micro and macro environment
+                sheet.append_row([today_str, symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist])
                 return True 
         except: time.sleep(1) 
     return False
@@ -386,7 +385,18 @@ with tab1:
                 
                 signal_time = "-"
                 
-                # 🟢 LOGGING UPGRADE: Log to cloud based purely on MATH
+                # 🧠 1. CALCULATE ALL AI FEATURES FIRST (For both Logging and Buying)
+                n_trend = round(float(intraday_pct), 2) if 'intraday_pct' in locals() else 0.0
+                try: c_vix = round(float(closes['^INDIAVIX'].dropna().iloc[-1]), 2)
+                except: c_vix = 15.0
+                
+                c_rvol = round(float(curr_vol / vol_sma20), 2) if vol_sma20 > 0 else 1.0
+                c_rsi = round(float(calculate_rsi(series).iloc[-1]), 2)
+                
+                c_sma200 = series.rolling(200).mean().iloc[-1]
+                c_dist = round(float(((curr_price - c_sma200) / c_sma200) * 100), 2) if c_sma200 > 0 else 0.0
+
+                # 🟢 2. LOGGING UPGRADE: Push all features to the Signal Log
                 if raw_technical_trigger:
                     active_symbols_now.append(symbol)
                     if now.time() >= datetime.time(9, 15):
@@ -394,12 +404,7 @@ with tab1:
                             current_time_str = now.strftime("%H:%M")
                             st.session_state.signal_history[symbol] = current_time_str
                             
-                            # 🧠 Capture the exact market environment for the AI Vault
-                            n_trend = round(float(intraday_pct), 2) if 'intraday_pct' in locals() else 0.0
-                            try: c_vix = round(float(closes['^INDIAVIX'].dropna().iloc[-1]), 2)
-                            except: c_vix = 15.0
-                            
-                            log_signal_cloud(symbol, current_time_str, status, n_trend, c_vix)
+                            log_signal_cloud(symbol, current_time_str, status, n_trend, c_vix, c_rvol, c_rsi, c_dist)
                     
                 if symbol in st.session_state.signal_history:
                     signal_time = st.session_state.signal_history[symbol]
@@ -409,7 +414,6 @@ with tab1:
                     
                     if now.time() >= cutoff_now and start_time_obj <= cutoff_start:
                         if curr_vol > vol_sma20: 
-                            # 🛡️ FAILSAFE PATCH: Re-verify market safety before afternoon upgrade
                             status = "✅ STRONG BUY" if is_safe_to_buy else "⛔ MKT WEAK"
                         else: status = "⚠️ LOW VOL"
 
@@ -420,29 +424,18 @@ with tab1:
                     "Gap %": f"{gap_pct:.1f}%"
                 })
                 
+                # 🟢 3. BUY EXECUTION UPGRADE: Reuse the exact same AI features
                 if bot_active and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
                     if symbol not in current_holdings and symbol not in st.session_state.blacklist:
                         
-                        # 🟢 AI UPGRADE: Calculate environment features right before executing buy
-                        try: curr_vix = round(float(closes['^INDIAVIX'].dropna().iloc[-1]), 2)
-                        except: curr_vix = 15.0 
-                        
-                        rvol = round(float(curr_vol / vol_sma20), 2) if vol_sma20 > 0 else 1.0
-                        rsi_val = round(float(calculate_rsi(series).iloc[-1]), 2)
-                        
-                        sma200 = series.rolling(200).mean().iloc[-1]
-                        dist_sma200 = round(float(((curr_price - sma200) / sma200) * 100), 2) if sma200 > 0 else 0.0
-                        
-                        nifty_trend = round(float(intraday_pct), 2) if 'intraday_pct' in locals() else 0.0
-
                         new_trade = {
                             "Date": now.strftime("%Y-%m-%d"), "EntryTime": now.strftime("%H:%M:%S"),
                             "Symbol": symbol, "Ticker": ticker, "Qty": 1, "BuyPrice": curr_price,
                             "StopPrice": curr_price * (1 - (risk_per_trade/100)), "Strategy": mode,
                             # 🧠 SILENT AI FEATURES
-                            "VIX": curr_vix, "Nifty_Trend": nifty_trend, "RVol": rvol,
-                            "RSI": rsi_val, "SMA200_Dist": dist_sma200
+                            "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
+                            "RSI": c_rsi, "SMA200_Dist": c_dist
                         }
                         
                         st.session_state.portfolio.append(new_trade)
@@ -674,6 +667,7 @@ with tab3:
                 st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
 
 
 
