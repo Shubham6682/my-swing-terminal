@@ -415,9 +415,14 @@ with tab1:
                     cutoff_now = datetime.time(15, 0)
                     
                     if now.time() >= cutoff_now and start_time_obj <= cutoff_start:
-                        if curr_vol > vol_sma20: 
-                            status = "✅ STRONG BUY" if is_safe_to_buy else "⛔ MKT WEAK"
-                        else: status = "⚠️ LOW VOL"
+                        # 🛡️ FATAL FLAW PATCH: Verify the stock didn't crash during the day
+                        if raw_technical_trigger:
+                            if curr_vol > vol_sma20: 
+                                status = "✅ STRONG BUY" if is_safe_to_buy else "⛔ MKT WEAK"
+                            else: 
+                                status = "⚠️ LOW VOL"
+                        else:
+                            status = "❌ FAILED SETUP" # It spiked in the morning but died by the afternoon
 
                 scan_results.append({
                     "Stock": symbol, "Status": status, "Signal Time": signal_time,
@@ -669,6 +674,7 @@ with tab3:
                 st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
 
 
 
