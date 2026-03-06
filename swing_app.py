@@ -59,6 +59,8 @@ def save_portfolio_cloud(data):
             sheet = client.open("Swing_Trading_DB").worksheet("Portfolio")
             if len(data) > 0:
                 df = pd.DataFrame(data)
+                # 🛡️ BUG FIX: Sanitize missing legacy data so Google Sheets doesn't crash
+                df = df.fillna("") 
                 write_data = [df.columns.values.tolist()] + df.values.tolist()
             else:
                 # 🟢 AI UPGRADE: Added AI Feature headers to fallback empty portfolio
@@ -667,6 +669,7 @@ with tab3:
                 st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
 
 
 
