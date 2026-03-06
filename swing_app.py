@@ -92,7 +92,7 @@ def log_trade_journal(trade):
             return True
     except: return False
 
-def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist):
+def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, price):
     if not st.session_state.db_connected: return False
     for attempt in range(3): 
         try:
@@ -100,10 +100,10 @@ def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, s
             if client:
                 sheet = client.open("Swing_Trading_DB").worksheet("Signal_Log")
                 if not sheet.row_values(1):
-                    headers = ["Date", "Symbol", "Time", "Status", "Nifty_Trend", "VIX", "RVol", "RSI", "SMA200_Dist"]
+                    headers = ["Date", "Symbol", "Time", "Status", "Nifty_Trend", "VIX", "RVol", "RSI", "SMA200_Dist", "Price"]
                     sheet.append_row(headers)
-                # 🟢 FULL AI PARITY: Logging the complete micro and macro environment
-                sheet.append_row([today_str, symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist])
+                # 🟢 THE FINAL LOCK: Securing the exact execution price for next month's AI simulation
+                sheet.append_row([today_str, symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, price])
                 return True 
         except: time.sleep(1) 
     return False
@@ -406,7 +406,7 @@ with tab1:
                             current_time_str = now.strftime("%H:%M")
                             st.session_state.signal_history[symbol] = current_time_str
                             
-                            log_signal_cloud(symbol, current_time_str, status, n_trend, c_vix, c_rvol, c_rsi, c_dist)
+                            log_signal_cloud(symbol, current_time_str, status, n_trend, c_vix, c_rvol, c_rsi, c_dist, curr_price)
                     
                 if symbol in st.session_state.signal_history:
                     signal_time = st.session_state.signal_history[symbol]
@@ -674,6 +674,7 @@ with tab3:
                 st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
 
 
 
