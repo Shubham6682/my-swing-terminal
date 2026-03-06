@@ -349,21 +349,28 @@ with tab1:
                 status, trigger_price = "⏳ WAIT", 0.0
                 symbol = ticker.replace(".NS", "")
                 
+                # 🟢 NEW: Isolate raw mathematical trigger from market filter
+                raw_technical_trigger = False 
+                
                 if mode == "🛡️ Swing (Sentinel)":
                     high_5d = series.tail(6).iloc[:-1].max()
                     sma200 = series.rolling(200).mean().iloc[-1]
                     if len(series) > 60: stock_perf = series.iloc[-1] / series.iloc[-60]
                     else: stock_perf = 0
                     trigger_price = high_5d
+                    
                     if curr_price > high_5d and curr_price > sma200 and stock_perf > nifty_perf:
+                        raw_technical_trigger = True
                         if is_safe_to_buy: status = "🎯 CONFIRMED"
                         else: status = "⛔ MKT WEAK"
                 else: 
                     bb_w = calculate_bollinger_width(series).iloc[-1]
                     rsi = calculate_rsi(series).iloc[-1]
                     vol_ma = vol_series.rolling(20).mean().iloc[-1]
+                    
                     if bb_w < 0.10: status = "👀 WATCH (Squeeze)"
                     elif (vol_series.iloc[-1] > vol_ma * 1.5) and rsi > 55:
+                        raw_technical_trigger = True
                         if is_safe_to_buy: 
                             status = "🚀 BREAKOUT"
                             trigger_price = curr_price
@@ -373,7 +380,9 @@ with tab1:
                 gap_pct = ((curr_price - trigger_price) / trigger_price) * 100 if trigger_price > 0 else 0
                 
                 signal_time = "-"
-                if status in ["🎯 CONFIRMED", "🚀 BREAKOUT"]:
+                
+                # 🟢 LOGGING UPGRADE: Log to cloud based purely on MATH
+                if raw_technical_trigger:
                     active_symbols_now.append(symbol)
                     if now.time() >= datetime.time(9, 15):
                         if symbol not in st.session_state.signal_history:
@@ -381,14 +390,17 @@ with tab1:
                             st.session_state.signal_history[symbol] = current_time_str
                             log_signal_cloud(symbol, current_time_str)
                     
-                    if symbol in st.session_state.signal_history:
-                        signal_time = st.session_state.signal_history[symbol]
-                        start_time_obj = datetime.datetime.strptime(signal_time, "%H:%M").time()
-                        cutoff_start = datetime.time(10, 0)
-                        cutoff_now = datetime.time(15, 0)
-                        if now.time() >= cutoff_now and start_time_obj <= cutoff_start:
-                            if curr_vol > vol_sma20: status = "✅ STRONG BUY"
-                            else: status = "⚠️ LOW VOL"
+                if symbol in st.session_state.signal_history:
+                    signal_time = st.session_state.signal_history[symbol]
+                    start_time_obj = datetime.datetime.strptime(signal_time, "%H:%M").time()
+                    cutoff_start = datetime.time(10, 0)
+                    cutoff_now = datetime.time(15, 0)
+                    
+                    if now.time() >= cutoff_now and start_time_obj <= cutoff_start:
+                        if curr_vol > vol_sma20: 
+                            # 🛡️ FAILSAFE PATCH: Re-verify market safety before afternoon upgrade
+                            status = "✅ STRONG BUY" if is_safe_to_buy else "⛔ MKT WEAK"
+                        else: status = "⚠️ LOW VOL"
 
                 scan_results.append({
                     "Stock": symbol, "Status": status, "Signal Time": signal_time,
@@ -651,5 +663,6 @@ with tab3:
                 st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
             else: st.write("No losses yet.")
     else: st.info("Journal Empty. Close trades to see analysis.")
+
 
 
