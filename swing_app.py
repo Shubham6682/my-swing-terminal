@@ -495,23 +495,22 @@ with tab2:
         
         for i, trade in enumerate(st.session_state.portfolio):
             api_glitch = False
-            # 🛡️ THE FIX 2: Strip spaces when reading the data back out of the Pandas table
-            # 🛡️ THE FIX 2: Read the downloaded data using the exact same .NS format
             clean_ticker = f"{str(trade['Ticker']).replace(' ', '').replace('.NS', '')}.NS"
             
             try:
-                if len(tickers) > 1 and not live_data.empty: 
-                    price = live_data[clean_ticker].dropna().iloc[-1]
-                elif not live_data.empty: 
-                    price = live_data.dropna().iloc[-1]
-                else: 
-                    price = float(trade['BuyPrice'])
-                    api_glitch = True
+                if live_data.empty:
+                    raise ValueError("Empty data")
+                
+                # 🛡️ THE FINAL FIX: Smart-detection that ignores how many stocks you own
+                if isinstance(live_data, pd.DataFrame):
+                    price = float(live_data[clean_ticker].dropna().iloc[-1])
+                else:
+                    price = float(live_data.dropna().iloc[-1])
                     
                 if pd.isna(price): 
-                    price = float(trade['BuyPrice'])
-                    api_glitch = True
-            except: 
+                    raise ValueError("NaN price")
+                    
+            except Exception as e: 
                 price = float(trade['BuyPrice'])
                 api_glitch = True
             
@@ -695,6 +694,7 @@ with tab3:
                 st.write("No losses yet.")
     else: 
         st.info("Journal Empty. Close trades to see analysis.")
+
 
 
 
