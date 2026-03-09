@@ -475,7 +475,8 @@ with tab1:
 with tab2:
     if st.session_state.portfolio:
         # 🛡️ THE FIX 1: Violently strip all hidden spaces from every ticker before downloading
-        tickers = [str(p['Ticker']).replace(" ", "") for p in st.session_state.portfolio]
+        # 🛡️ THE FIX 1: Auto-enforce the .NS suffix so Yahoo searches the Indian market
+        tickers = [f"{str(p['Ticker']).replace(' ', '').replace('.NS', '')}.NS" for p in st.session_state.portfolio]
         
         try:
             live_data = yf.download(tickers, period="1d", interval="1m", threads=False, progress=False)['Close']
@@ -495,7 +496,8 @@ with tab2:
         for i, trade in enumerate(st.session_state.portfolio):
             api_glitch = False
             # 🛡️ THE FIX 2: Strip spaces when reading the data back out of the Pandas table
-            clean_ticker = str(trade['Ticker']).replace(" ", "")
+            # 🛡️ THE FIX 2: Read the downloaded data using the exact same .NS format
+            clean_ticker = f"{str(trade['Ticker']).replace(' ', '').replace('.NS', '')}.NS"
             
             try:
                 if len(tickers) > 1 and not live_data.empty: 
@@ -693,6 +695,7 @@ with tab3:
                 st.write("No losses yet.")
     else: 
         st.info("Journal Empty. Close trades to see analysis.")
+
 
 
 
