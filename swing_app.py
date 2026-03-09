@@ -59,40 +59,39 @@ def save_portfolio_cloud(data):
             sheet = client.open("Swing_Trading_DB").worksheet("Portfolio")
             if len(data) > 0:
                 df = pd.DataFrame(data)
-                # 🛡️ BUG FIX: Sanitize missing legacy data so Google Sheets doesn't crash
                 df = df.fillna("") 
                 write_data = [df.columns.values.tolist()] + df.values.tolist()
             else:
-                # 🟢 AI UPGRADE: Added AI Feature headers to fallback empty portfolio
-                write_data = [["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "StopPrice", "Strategy", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist"]]
+                # 🟢 AI UPGRADE: Added Defensive Metrics to fallback headers
+                write_data = [["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "StopPrice", "Strategy", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D"]]
             sheet.clear()
             sheet.update(write_data)
-    except Exception as e:
-        print(f"Cloud Save Error: {e}")
+    except Exception as e: print(f"Cloud Save Error: {e}")
 
 def log_trade_journal(trade):
     if not st.session_state.db_connected: return False
-    # 🟢 AI UPGRADE: Inject the 5 new Market Context features into the Journal row
     row = [
         trade.get("Date", ""), trade.get("EntryTime", ""), trade.get("Symbol", ""), trade.get("Ticker", ""),
         trade.get("Qty", 0), trade.get("BuyPrice", 0.0), trade.get("ExitPrice", 0.0),
         trade.get("ExitDate", ""), trade.get("ExitTime", ""), trade.get("PnL", 0.0), trade.get("Result", ""),
         trade.get("Strategy", ""), trade.get("VIX", 0.0), trade.get("Nifty_Trend", 0.0),
-        trade.get("RVol", 0.0), trade.get("RSI", 0.0), trade.get("SMA200_Dist", 0.0)
+        trade.get("RVol", 0.0), trade.get("RSI", 0.0), trade.get("SMA200_Dist", 0.0),
+        # 🟢 AI UPGRADE: Push defensive metrics to Journal
+        trade.get("SMA20_Dist", 0.0), trade.get("Wick_Reject", 0.0), trade.get("Nifty_5D", 0.0)
     ]
     try:
         client = init_google_sheet()
         if client:
             sheet = client.open("Swing_Trading_DB").worksheet("Journal")
             if not sheet.row_values(1):
-                # 🟢 AI UPGRADE: Expand Journal headers
-                headers = ["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "ExitPrice", "ExitDate", "ExitTime", "PnL", "Result", "Strategy", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist"]
+                headers = ["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "ExitPrice", "ExitDate", "ExitTime", "PnL", "Result", "Strategy", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D"]
                 sheet.append_row(headers)
             sheet.append_row(row)
             return True
     except: return False
 
-def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, price):
+# 🟢 AI UPGRADE: Added the 3 new parameters to the Signal Logger (price remains last)
+def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, price):
     if not st.session_state.db_connected: return False
     for attempt in range(3): 
         try:
@@ -100,10 +99,9 @@ def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, s
             if client:
                 sheet = client.open("Swing_Trading_DB").worksheet("Signal_Log")
                 if not sheet.row_values(1):
-                    headers = ["Date", "Symbol", "Time", "Status", "Nifty_Trend", "VIX", "RVol", "RSI", "SMA200_Dist", "Price"]
+                    headers = ["Date", "Symbol", "Time", "Status", "Nifty_Trend", "VIX", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Price"]
                     sheet.append_row(headers)
-                # 🟢 THE FINAL LOCK: Securing the exact execution price for next month's AI simulation
-                sheet.append_row([today_str, symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, price])
+                sheet.append_row([today_str, symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, price])
                 return True 
         except: time.sleep(1) 
     return False
@@ -201,23 +199,31 @@ TICKERS = [f"{t}.NS" for t in NIFTY_50]
 @st.cache_data(ttl=60)
 def get_market_data():
     try:
-        if now.time() < datetime.time(9, 0): return pd.DataFrame(), pd.DataFrame()
-        # 🟢 AI UPGRADE: Appended ^INDIAVIX to pull the Fear Gauge
+        # 🟢 AI UPGRADE: Safely return three empty DataFrames if pre-market
+        if now.time() < datetime.time(9, 0): return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         data = yf.download(TICKERS + ["^NSEI", "^INDIAVIX"], period="1y", threads=False, progress=False)
-        return data['Close'], data['Volume']
-    except: return pd.DataFrame(), pd.DataFrame()
+        # 🟢 AI UPGRADE: Now pulling 'High' to calculate wick rejection
+        return data['Close'], data['Volume'], data['High']
+    except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-closes, volumes = get_market_data()
+# Unpack all 3 datasets
+closes, volumes, highs = get_market_data()
 
 is_safe_to_buy = False 
 market_status_msg = "⚪ MARKET DATA LOADING..."
 
+nifty_5d_trend = 0.0  # Default baseline
 if not closes.empty and '^NSEI' in closes.columns:
     nifty_closes = closes['^NSEI'].dropna()
     if len(nifty_closes) > 20:
         nifty_sma20 = nifty_closes.rolling(20).mean().iloc[-1]
         nifty_curr = nifty_closes.iloc[-1]
         nifty_prev = nifty_closes.iloc[-2]
+        
+        # 🟢 AI UPGRADE: Calculate 5-Day Nifty crash metric
+        if len(nifty_closes) > 5:
+            nifty_5d_prev = nifty_closes.iloc[-6]
+            nifty_5d_trend = ((nifty_curr - nifty_5d_prev) / nifty_5d_prev) * 100
         
         intraday_pct = ((nifty_curr - nifty_prev) / nifty_prev) * 100
         is_macro_bullish = nifty_curr > nifty_sma20
@@ -389,6 +395,8 @@ with tab1:
                 
                 # 🧠 1. CALCULATE ALL AI FEATURES FIRST (For both Logging and Buying)
                 n_trend = round(float(intraday_pct), 2) if 'intraday_pct' in locals() else 0.0
+                c_nifty_5d = round(float(nifty_5d_trend), 2)
+                
                 try: c_vix = round(float(closes['^INDIAVIX'].dropna().iloc[-1]), 2)
                 except: c_vix = 15.0
                 
@@ -397,17 +405,24 @@ with tab1:
                 
                 c_sma200 = series.rolling(200).mean().iloc[-1]
                 c_dist = round(float(((curr_price - c_sma200) / c_sma200) * 100), 2) if c_sma200 > 0 else 0.0
+                
+                # 🟢 AI UPGRADE: Defensive Metrics
+                c_sma20 = series.rolling(20).mean().iloc[-1]
+                c_sma20_dist = round(float(((curr_price - c_sma20) / c_sma20) * 100), 2) if c_sma20 > 0 else 0.0
+                
+                daily_high = highs[ticker].dropna().iloc[-1] if not highs[ticker].dropna().empty else curr_price
+                c_wick_reject = round(float(((daily_high - curr_price) / daily_high) * 100), 2) if daily_high > 0 else 0.0
 
                 # 🟢 2. LOGGING UPGRADE: Push all features to the Signal Log
                 if raw_technical_trigger:
                     active_symbols_now.append(symbol)
-                    # 🛡️ THE WEEKEND PATCH: Only log when the market is officially active (Mon-Fri)
                     if is_market_active:
                         if symbol not in st.session_state.signal_history:
                             current_time_str = now.strftime("%H:%M")
                             st.session_state.signal_history[symbol] = current_time_str
                             
-                            log_signal_cloud(symbol, current_time_str, status, n_trend, c_vix, c_rvol, c_rsi, c_dist, curr_price)
+                            # 🛡️ New 12-argument function call
+                            log_signal_cloud(symbol, current_time_str, status, n_trend, c_vix, c_rvol, c_rsi, c_dist, c_sma20_dist, c_wick_reject, c_nifty_5d, curr_price)
                     
                 if symbol in st.session_state.signal_history:
                     signal_time = st.session_state.signal_history[symbol]
@@ -416,14 +431,13 @@ with tab1:
                     cutoff_now = datetime.time(15, 0)
                     
                     if now.time() >= cutoff_now and start_time_obj <= cutoff_start:
-                        # 🛡️ FATAL FLAW PATCH: Verify the stock didn't crash during the day
                         if raw_technical_trigger:
                             if curr_vol > vol_sma20: 
                                 status = "✅ STRONG BUY" if is_safe_to_buy else "⛔ MKT WEAK"
                             else: 
                                 status = "⚠️ LOW VOL"
                         else:
-                            status = "❌ FAILED SETUP" # It spiked in the morning but died by the afternoon
+                            status = "❌ FAILED SETUP"
 
                 scan_results.append({
                     "Stock": symbol, "Status": status, "Signal Time": signal_time,
@@ -443,7 +457,8 @@ with tab1:
                             "StopPrice": curr_price * (1 - (risk_per_trade/100)), "Strategy": mode,
                             # 🧠 SILENT AI FEATURES
                             "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
-                            "RSI": c_rsi, "SMA200_Dist": c_dist
+                            "RSI": c_rsi, "SMA200_Dist": c_dist,
+                            "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d
                         }
                         
                         st.session_state.portfolio.append(new_trade)
@@ -695,6 +710,7 @@ with tab3:
                 st.write("No losses yet.")
     else: 
         st.info("Journal Empty. Close trades to see analysis.")
+
 
 
 
