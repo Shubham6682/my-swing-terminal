@@ -474,10 +474,13 @@ with tab1:
 # --- TAB 2: PORTFOLIO & AUTO-EXIT ---
 with tab2:
     if st.session_state.portfolio:
-        tickers = [p['Ticker'] for p in st.session_state.portfolio]
+        # 🛡️ THE FIX 1: Violently strip all hidden spaces from every ticker before downloading
+        tickers = [str(p['Ticker']).replace(" ", "") for p in st.session_state.portfolio]
+        
         try:
             live_data = yf.download(tickers, period="1d", interval="1m", threads=False, progress=False)['Close']
-        except: live_data = pd.DataFrame()
+        except: 
+            live_data = pd.DataFrame()
         
         total_val, total_inv = 0, 0
         portfolio_changed = False
@@ -491,12 +494,18 @@ with tab2:
         
         for i, trade in enumerate(st.session_state.portfolio):
             api_glitch = False
+            # 🛡️ THE FIX 2: Strip spaces when reading the data back out of the Pandas table
+            clean_ticker = str(trade['Ticker']).replace(" ", "")
+            
             try:
-                if len(tickers) > 1 and not live_data.empty: price = live_data[trade['Ticker']].dropna().iloc[-1]
-                elif not live_data.empty: price = live_data.dropna().iloc[-1]
+                if len(tickers) > 1 and not live_data.empty: 
+                    price = live_data[clean_ticker].dropna().iloc[-1]
+                elif not live_data.empty: 
+                    price = live_data.dropna().iloc[-1]
                 else: 
                     price = float(trade['BuyPrice'])
                     api_glitch = True
+                    
                 if pd.isna(price): 
                     price = float(trade['BuyPrice'])
                     api_glitch = True
@@ -572,13 +581,16 @@ with tab2:
                     portfolio_changed = True
                     action_taken = True
 
+            # Cleaned up duplicate UI block (Only draws once now)
             if not action_taken:
                 c1, c2, c3, c4, c5 = st.columns(5)
                 c1.write(f"**{trade['Symbol']}**")
                 c2.write(f"Entry: {buy:.2f}")
                 
-                if api_glitch: c3.metric("LTP", "API Syncing...", "Holding...")
-                else: c3.metric("LTP", f"{price:.2f}", f"{pnl_pct:.2f}%")
+                if api_glitch: 
+                    c3.metric("LTP", "API Syncing...", "Holding...")
+                else: 
+                    c3.metric("LTP", f"{price:.2f}", f"{pnl_pct:.2f}%")
                     
                 c4.metric("Stop Loss", f"{new_sl:.2f}", help="Auto-Managed")
                 
@@ -615,11 +627,14 @@ with tab2:
             total_roi_pct = (total_floating_pnl / total_inv) * 100 if total_inv > 0 else 0.0
             c2.metric("Total Floating PnL", f"₹{total_floating_pnl:,.2f}", f"{total_roi_pct:.2f}% Overall")
             
-            if today_pnl >= 0: c3.metric(f"Today's PnL ({today_count} trades)", f"₹{today_pnl:,.2f}", "📈 Sourced Today")
-            else: c3.metric(f"Today's PnL ({today_count} trades)", f"₹{today_pnl:,.2f}", "📉 Sourced Today")
+            if today_pnl >= 0: 
+                c3.metric(f"Today's PnL ({today_count} trades)", f"₹{today_pnl:,.2f}", "📈 Sourced Today")
+            else: 
+                c3.metric(f"Today's PnL ({today_count} trades)", f"₹{today_pnl:,.2f}", "📉 Sourced Today")
                 
             c4.metric("Live Market Heat", f"{winners} Green / {losers} Red", border=True)
-    else: st.info("Portfolio Empty. Go to Scanner to find stocks.")
+    else: 
+        st.info("Portfolio Empty. Go to Scanner to find stocks.")
 
 # --- TAB 3: ANALYSIS ---
 with tab3:
@@ -656,7 +671,8 @@ with tab3:
                 
             if st.session_state.show_audit:
                 run_advanced_audit(df_j)
-        else: st.info("No valid trades found in Journal.")
+        else: 
+            st.info("No valid trades found in Journal.")
         
         st.divider()
         c1, c2 = st.columns(2)
@@ -665,15 +681,18 @@ with tab3:
             winners = df_j[df_j['PnL'] > 0]
             if not winners.empty:
                 st.dataframe(winners.sort_values('PnL', ascending=False)[['Symbol', 'PnL', 'Strategy']], hide_index=True)
-            else: st.write("No wins yet.")
+            else: 
+                st.write("No wins yet.")
             
         with c2:
             st.write("⚠️ **All Losers**")
             losers = df_j[df_j['PnL'] < 0]
             if not losers.empty:
                 st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
-            else: st.write("No losses yet.")
-    else: st.info("Journal Empty. Close trades to see analysis.")
+            else: 
+                st.write("No losses yet.")
+    else: 
+        st.info("Journal Empty. Close trades to see analysis.")
 
 
 
