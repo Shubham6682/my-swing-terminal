@@ -401,7 +401,8 @@ with tab1:
                 # 🟢 2. LOGGING UPGRADE: Push all features to the Signal Log
                 if raw_technical_trigger:
                     active_symbols_now.append(symbol)
-                    if now.time() >= datetime.time(9, 15):
+                    # 🛡️ THE WEEKEND PATCH: Only log when the market is officially active (Mon-Fri)
+                    if is_market_active:
                         if symbol not in st.session_state.signal_history:
                             current_time_str = now.strftime("%H:%M")
                             st.session_state.signal_history[symbol] = current_time_str
@@ -694,6 +695,7 @@ with tab3:
                 st.write("No losses yet.")
     else: 
         st.info("Journal Empty. Close trades to see analysis.")
+
 
 
 
