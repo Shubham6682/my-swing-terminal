@@ -448,8 +448,8 @@ with tab1:
                 
                 # 🟢 3. BUY EXECUTION UPGRADE: Reuse the exact same AI features
                 # 🟢 AI UPGRADE: Time-lock auto-buys until 1:30 PM to prevent fake morning RVol traps
-              is_afternoon = now.time() >= datetime.time(13, 30)
-              if bot_active and is_afternoon and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
+                is_afternoon = now.time() >= datetime.time(13, 30)
+                if bot_active and is_afternoon and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
                     if symbol not in current_holdings and symbol not in st.session_state.blacklist:
                         
