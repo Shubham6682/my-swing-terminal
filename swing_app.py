@@ -710,15 +710,3 @@ with tab3:
                 st.write("No losses yet.")
     else: 
         st.info("Journal Empty. Close trades to see analysis.")
-
-
-
-
-
-
-
-
-
-
-
-
