@@ -23,7 +23,7 @@ is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_c
 
 # --- MARKET HOURS REFRESH LOGIC ---
 if is_market_active:
-    st_autorefresh(interval=30000, key="quant_v18_active_only")
+    st_autorefresh(interval=300000, key="quant_v18_active_only")
 else:
     st.info("🌙 Market is Closed. Auto-refresh is paused to save resources.")
 
@@ -145,7 +145,7 @@ with st.sidebar:
         st.error("⚠️ Offline: Trading Disabled")
         bot_active, auto_sell = False, False
         
-    risk_per_trade = st.slider("Risk Per Trade (%)", 0.5, 5.0, 1.5)
+    risk_per_trade = st.slider("Swing Risk (%)", 1.0, 8.0, 3.0)
     
     st.divider()
     st.subheader("🔔 Notification Log")
@@ -447,7 +447,9 @@ with tab1:
                 })
                 
                 # 🟢 3. BUY EXECUTION UPGRADE: Reuse the exact same AI features
-                if bot_active and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
+                # 🟢 AI UPGRADE: Time-lock auto-buys until 1:30 PM to prevent fake morning RVol traps
+              is_afternoon = now.time() >= datetime.time(13, 30)
+              if bot_active and is_afternoon and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
                     if symbol not in current_holdings and symbol not in st.session_state.blacklist:
                         
