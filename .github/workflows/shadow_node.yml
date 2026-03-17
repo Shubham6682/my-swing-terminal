@@ -33,7 +33,7 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git pull origin main --rebase
-          git add nifty500_shadow_log.csv
-          git commit -m "🤖 Shadow Node: Harvested Market Anomalies" || echo "No new anomalies to log"
-          git push
+          git pull origin main --rebase || true
+          git add nifty500_shadow_log.csv || true
+          git commit -m "🤖 Shadow Node: Harvested Market Anomalies" || true
+          git push || true
