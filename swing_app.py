@@ -209,30 +209,6 @@ def get_market_data():
 # Unpack all 3 datasets
 closes, volumes, highs = get_market_data()
 
-# 🟢 DHAN API UPGRADE: Pull flawless live Index data directly from NSE
-dhan_nifty_ltp = None
-try:
-    from dhanhq import dhanhq
-    client_id = st.secrets["DHAN_CLIENT_ID"]
-    access_token = st.secrets["DHAN_ACCESS_TOKEN"]
-    
-    # 🔧 FIX 1: Using standard auth to bypass the library bug
-    dhan = dhanhq(client_id, access_token)
-    
-    # '13' is the official NSE code for the Nifty 50 Index
-    live_indices = dhan.ticker_data(securities={"IDX_I": ["13"]})
-    
-    # 🔧 FIX 2: Check if Dhan actually approved the request before extracting price
-    if live_indices.get('status') == 'success':
-        dhan_nifty_ltp = live_indices['data']['IDX_I']['13']['last_price']
-    else:
-        # If Dhan rejects it (e.g., bad token), print the exact reason to the sidebar
-        st.sidebar.error(f"🔌 Dhan API Rejected: {live_indices}")
-        
-except Exception as e:
-    # If the Python code crashes, print the crash reason to the sidebar
-    st.sidebar.error(f"🔌 Dhan API Crash: {e}")
-
 is_safe_to_buy = False 
 market_status_msg = "⚪ MARKET DATA LOADING..."
 
@@ -241,10 +217,7 @@ if not closes.empty and '^NSEI' in closes.columns:
     nifty_closes = closes['^NSEI'].dropna()
     if len(nifty_closes) > 20:
         nifty_sma20 = nifty_closes.rolling(20).mean().iloc[-1]
-        
-        # 🟢 THE OVERRIDE
-        nifty_curr = dhan_nifty_ltp if dhan_nifty_ltp else nifty_closes.iloc[-1]
-        
+        nifty_curr = nifty_closes.iloc[-1]
         nifty_prev = nifty_closes.iloc[-2]
         
         # 🟢 AI UPGRADE: Calculate 5-Day Nifty crash metric
