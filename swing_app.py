@@ -209,6 +209,20 @@ def get_market_data():
 # Unpack all 3 datasets
 closes, volumes, highs = get_market_data()
 
+# 🟢 DHAN API UPGRADE: Pull flawless live Index data directly from NSE
+dhan_nifty_ltp = None
+try:
+    from dhanhq import DhanContext, dhanhq
+    client_id = st.secrets["DHAN_CLIENT_ID"]
+    access_token = st.secrets["DHAN_ACCESS_TOKEN"]
+    dhan = dhanhq(DhanContext(client_id, access_token))
+    
+    # '13' is the official NSE code for the Nifty 50 Index
+    live_indices = dhan.ticker_data(securities={"IDX_I": ["13"]})
+    dhan_nifty_ltp = live_indices['data']['IDX_I']['13']['last_price']
+except Exception as e:
+    pass # If token expires, it silently fails and falls back to yfinance
+
 is_safe_to_buy = False 
 market_status_msg = "⚪ MARKET DATA LOADING..."
 
@@ -217,7 +231,10 @@ if not closes.empty and '^NSEI' in closes.columns:
     nifty_closes = closes['^NSEI'].dropna()
     if len(nifty_closes) > 20:
         nifty_sma20 = nifty_closes.rolling(20).mean().iloc[-1]
-        nifty_curr = nifty_closes.iloc[-1]
+        
+        # 🟢 THE OVERRIDE: Replace yfinance's broken live price with Dhan's flawless price
+        nifty_curr = dhan_nifty_ltp if dhan_nifty_ltp else nifty_closes.iloc[-1]
+        
         nifty_prev = nifty_closes.iloc[-2]
         
         # 🟢 AI UPGRADE: Calculate 5-Day Nifty crash metric
