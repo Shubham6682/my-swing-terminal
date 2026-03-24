@@ -90,20 +90,39 @@ def log_trade_journal(trade):
             return True
     except: return False
 
-# 🟢 AI UPGRADE: Added the 3 new parameters to the Signal Logger (price remains last)
 def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, price):
     if not st.session_state.db_connected: return False
-    for attempt in range(3): 
-        try:
-            client = init_google_sheet()
-            if client:
-                sheet = client.open("Swing_Trading_DB").worksheet("Signal_Log")
-                if not sheet.row_values(1):
-                    headers = ["Date", "Symbol", "Time", "Status", "Nifty_Trend", "VIX", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Price"]
-                    sheet.append_row(headers)
-                sheet.append_row([today_str, symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, price])
-                return True 
-        except: time.sleep(1) 
+    
+    try:
+        client = init_google_sheet()
+        if client:
+            sheet = client.open("Swing_Trading_DB").worksheet("Signal_Log")
+            
+            # 🟢 THE FIX: The Cloud Safety Lock
+            # Pull the sheet data to verify it hasn't been logged yet
+            all_values = sheet.get_all_values()
+            
+            # Only check the last 20 rows to keep the engine lightning fast
+            recent_rows = all_values[-20:] if len(all_values) > 20 else all_values
+            
+            # Look for an exact match of Today's Date AND the Symbol
+            for row in recent_rows:
+                if len(row) > 1 and row[0] == today_str and row[1] == symbol:
+                    # It's already in the cloud! Cancel the duplicate write silently.
+                    return True 
+            
+            # If the sheet is completely empty, add the headers
+            if not all_values:
+                headers = ["Date", "Symbol", "Time", "Status", "Nifty_Trend", "VIX", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Price"]
+                sheet.append_row(headers)
+            
+            # Safe to write the new data
+            sheet.append_row([today_str, symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, price])
+            return True 
+            
+    except Exception as e: 
+        print(f"Cloud Log Error: {e}")
+        
     return False
 
 def load_signals_from_cloud():
