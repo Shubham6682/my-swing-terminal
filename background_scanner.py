@@ -3,6 +3,7 @@ import pandas as pd
 import datetime
 import pytz
 import os
+import sys
 
 # --- 1. SYSTEM BOOT ---
 ist = pytz.timezone('Asia/Kolkata')
@@ -12,20 +13,36 @@ current_time_str = now.strftime("%H:%M")
 
 print(f"🤖 Shadow Node Booting Up: {today_str} at {current_time_str} IST")
 
-# --- 2. THE BROAD MARKET UNIVERSE ---
+# --- 2. HOLIDAY SENSOR (Safety Lock) ---
+print("Checking Market Status...")
+nifty_check = yf.download("^NSEI", period="1d", progress=False)
+
+if nifty_check.empty:
+    print("Market Closed/Holiday Detected (No Data). Shutting down harvester.")
+    sys.exit()
+
+latest_date_in_data = nifty_check.index[-1].strftime("%Y-%m-%d")
+
+if latest_date_in_data != today_str:
+    print(f"Market Closed/Holiday Detected. Data is from {latest_date_in_data}, not {today_str}. Shutting down.")
+    sys.exit()
+
+print("Market is active. Proceeding with data harvest...")
+
+# --- 3. THE BROAD MARKET UNIVERSE ---
 # Using the top ~150 high-liquidity F&O and Midcap stocks to avoid Yahoo API bans while getting 10x the data
 ticker_string = "RELIANCE,TCS,HDFCBANK,ICICIBANK,BHARTIARTL,SBIN,INFY,LICI,ITC,HINDUNILVR,LT,BAJFINANCE,HCLTECH,MARUTI,SUNPHARMA,TATAMOTORS,M&M,ULTRACEMCO,NTPC,POWERGRID,ASIANPAINT,COALINDIA,ONGC,BAJAJFINSV,ADANIENT,HAL,KOTAKBANK,TITAN,ADANIPORTS,WIPRO,JSWSTEEL,SIEMENS,TATASTEEL,IRFC,LTIM,ZOMATO,IOC,BAJAJ-AUTO,GRASIM,TECHM,BEL,HINDZINC,TRENT,CHOLAFIN,VEDL,DLF,INDUSINDBK,PFC,SBILIFE,RECLTD,HINDALCO,GODREJCP,EICHERMOT,DRREDDY,TVSMOTOR,CIPLA,DIVISLAB,GAIL,INDIGO,APOLLOHOSP,BPCL,BRITANNIA,BOSCHLTD,CUMMINSIND,PIDILITIND,SHRIRAMFIN,TORNTPHARM,HEROMOTOCO,MANAPPURAM,LUPIN,JINDALSTEL,CGPOWER,POLYCAB,BHEL,NHPC,YESBANK,IDFCFIRSTB,SUZLON,RVNL,IREDA,JIOFIN,PAYTM,NYKAA,POLICYBZR"
 tickers = [f"{t}.NS" for t in ticker_string.split(",")]
 all_symbols = tickers + ["^NSEI", "^INDIAVIX"]
 
-# --- 3. BULK DOWNLOAD (API Shield) ---
+# --- 4. BULK DOWNLOAD (API Shield) ---
 print("Downloading Market Data...")
 try:
     data = yf.download(all_symbols, period="1y", interval="1d", threads=True, progress=False)
     closes, volumes, highs = data['Close'], data['Volume'], data['High']
 except Exception as e:
     print(f"API Error: {e}")
-    exit()
+    sys.exit()
 
 # Extract Market Context
 nifty_trend, vix = 0.0, 15.0
@@ -35,7 +52,7 @@ try:
     vix = round(float(closes['^INDIAVIX'].dropna().iloc[-1]), 2)
 except: pass
 
-# --- 4. THE QUANT ENGINE ---
+# --- 5. THE QUANT ENGINE ---
 def calculate_rsi(series, period=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
@@ -84,7 +101,7 @@ for ticker in tickers:
             })
     except: continue
 
-# --- 5. SECURE DATA TO CSV ---
+# --- 6. SECURE DATA TO CSV ---
 if results:
     df_results = pd.DataFrame(results)
     file_name = "nifty500_shadow_log.csv"
