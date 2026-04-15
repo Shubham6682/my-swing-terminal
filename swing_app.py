@@ -574,11 +574,17 @@ with tab2:
             msg, new_sl = "", sl
             
             if not api_glitch:
-                if pnl_pct > 4.0 and sl < buy:
-                    new_sl = buy
-                    msg = "🛡️ RISK FREE"
+                # 🟢 UPGRADE PHASE 1: The Profit Ratchet 
+                # When stock hits +4%, lock in a guaranteed +2% profit
+                if pnl_pct >= 4.0 and pnl_pct < 6.0:
+                    locked_sl = round(buy * 1.02, 2)
+                    if locked_sl > new_sl:
+                        new_sl = locked_sl
+                        msg = "🪙 LOCKED +2%"
                 
-                if pnl_pct > 6.0:
+                # 🟢 UPGRADE PHASE 2: The Dynamic Trail
+                # When stock hits +6%, trail it strictly by 4%
+                elif pnl_pct >= 6.0:
                     trail = round(price * 0.96, 2)
                     if trail > new_sl:
                         new_sl = trail
