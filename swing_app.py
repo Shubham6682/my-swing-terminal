@@ -190,20 +190,20 @@ with st.sidebar:
         st.rerun()
 
     with st.expander("🔧 Diagnostics"):
-            show_all = st.checkbox("Show 'WAIT' Stocks", value=True) 
-            if st.button("Test DB Connection"):
-                if init_google_sheet(): 
-                    st.session_state.db_connected = True
-                    st.success("✅ Connected")
-                else: 
-                    st.session_state.db_connected = False
-                    st.error("❌ Failed")
+        show_all = st.checkbox("Show 'WAIT' Stocks", value=True) 
+        if st.button("Test DB Connection"):
+            if init_google_sheet(): 
+                st.session_state.db_connected = True
+                st.success("✅ Connected")
+            else: 
+                st.session_state.db_connected = False
+                st.error("❌ Failed")
 
-        st.divider()
-        st.subheader("🛠️ Emergency API Override")
-        use_manual_nifty = st.checkbox("Force Manual Nifty Data", help="Check this if yfinance is frozen or showing old dates.")
-        manual_intraday = st.number_input("Enter Live Nifty % (e.g., -0.45)", value=0.00, step=0.05)
-        manual_5d = st.number_input("Enter 5-Day Nifty % (e.g., -2.10)", value=0.00, step=0.05)
+    st.divider()
+    st.subheader("🛠️ Emergency API Override")
+    use_manual_nifty = st.checkbox("Force Manual Nifty Data", help="Check this if yfinance is frozen or showing old dates.")
+    manual_intraday = st.number_input("Enter Live Nifty % (e.g., -0.45)", value=0.00, step=0.05)
+    manual_5d = st.number_input("Enter 5-Day Nifty % (e.g., -2.10)", value=0.00, step=0.05)
 
 # --- 5. INDICATORS & MARKET DATA ---
 def calculate_rsi(series, period=14):
@@ -291,6 +291,7 @@ else:
         market_status_msg = "🌙 PRE-MARKET: Waiting for 9:15 AM..."
     else: 
         market_status_msg = "⚠️ NIFTY DATA ERROR (Running Safe Mode)"
+
 c1, c2 = st.columns([3, 1])
 with c1:
     st.title("☁️ Elite Quant Terminal")
