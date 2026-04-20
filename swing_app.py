@@ -190,14 +190,22 @@ with st.sidebar:
         st.rerun()
 
     with st.expander("🔧 Diagnostics"):
-        show_all = st.checkbox("Show 'WAIT' Stocks", value=True) 
-        if st.button("Test DB Connection"):
-            if init_google_sheet(): 
-                st.session_state.db_connected = True
-                st.success("✅ Connected")
-            else: 
-                st.session_state.db_connected = False
-                st.error("❌ Failed")
+            show_all = st.checkbox("Show 'WAIT' Stocks", value=True) 
+            if st.button("Test DB Connection"):
+                if init_google_sheet(): 
+                    st.session_state.db_connected = True
+                    st.success("✅ Connected")
+                else: 
+                    st.session_state.db_connected = False
+                    st.error("❌ Failed")
+
+        # --- PASTE THE NEW OVERRIDE UI HERE ---
+        # Notice how st.divider() aligns with the 'w' in 'with st.expander'
+        st.divider()
+        st.subheader("🛠️ Emergency API Override")
+        use_manual_nifty = st.checkbox("Force Manual Nifty Data", help="Check this if yfinance is frozen or showing old dates.")
+        manual_intraday = st.number_input("Enter Live Nifty % (e.g., -0.45)", value=0.00, step=0.05)
+        manual_5d = st.number_input("Enter 5-Day Nifty % (e.g., -2.10)", value=0.00, step=0.05)
 
 # --- 5. INDICATORS & MARKET DATA ---
 def calculate_rsi(series, period=14):
@@ -228,38 +236,63 @@ def get_market_data():
 # Unpack all 3 datasets
 closes, volumes, highs = get_market_data()
 
-is_safe_to_buy = False 
+# --- MASTER NIFTY LOGIC (SHIELD + OVERRIDE) ---
+nifty_5d_trend = 0.0  
+intraday_pct = 0.0    
+is_safe_to_buy = False
 market_status_msg = "⚪ MARKET DATA LOADING..."
 
-nifty_5d_trend = 0.0  # Default baseline
-if not closes.empty and '^NSEI' in closes.columns:
-    nifty_closes = closes['^NSEI'].dropna()
-    if len(nifty_closes) > 20:
-        nifty_sma20 = nifty_closes.rolling(20).mean().iloc[-1]
-        nifty_curr = nifty_closes.iloc[-1]
-        nifty_prev = nifty_closes.iloc[-2]
-        
-        # 🟢 AI UPGRADE: Calculate 5-Day Nifty crash metric
-        if len(nifty_closes) > 5:
-            nifty_5d_prev = nifty_closes.iloc[-6]
-            nifty_5d_trend = ((nifty_curr - nifty_5d_prev) / nifty_5d_prev) * 100
-        
-        intraday_pct = ((nifty_curr - nifty_prev) / nifty_prev) * 100
-        is_macro_bullish = nifty_curr > nifty_sma20
-        is_bleeding = intraday_pct < -0.3
-        
-        is_safe_to_buy = is_macro_bullish and not is_bleeding
-        
-        if is_bleeding:
-            market_status_msg = f"🔴 CRITICAL: NIFTY BLEEDING ({intraday_pct:.2f}%). ALL BUYING HALTED."
-        elif not is_macro_bullish:
-            market_status_msg = f"🔴 MARKET MOOD: BEARISH (Below 20 SMA). Buying Paused."
-        else:
-            market_status_msg = f"🟢 MARKET MOOD: BULLISH (Up {intraday_pct:.2f}%)"
-else:
-    if now.time() < datetime.time(9, 15): market_status_msg = "🌙 PRE-MARKET: Waiting for 9:15 AM..."
-    else: market_status_msg = "⚠️ NIFTY DATA ERROR (Running Safe Mode)"
+# 1. GOD MODE: Manual Override Active
+if use_manual_nifty:
+    intraday_pct = float(manual_intraday)
+    nifty_5d_trend = float(manual_5d)
+    
+    is_bleeding = intraday_pct < -0.3
+    is_macro_bullish = True 
+    is_safe_to_buy = not is_bleeding
+    
+    if is_bleeding:
+        market_status_msg = f"🔴 MANUAL OVERRIDE: Nifty Bleeding ({intraday_pct:.2f}%) - Buying Halted"
+    else:
+        market_status_msg = f"⚠️ MANUAL OVERRIDE ACTIVE: Intraday {intraday_pct}%, 5-Day {nifty_5d_trend}%"
 
+# 2. STANDARD MODE: API Data Processing
+elif not closes.empty and '^NSEI' in closes.columns:
+    nifty_closes = closes['^NSEI'].dropna()
+    
+    if len(nifty_closes) > 20:
+        # 🟢 THE SHIELD: Check if the API data is stale
+        last_data_date = nifty_closes.index[-1].tz_localize(None).strftime("%Y-%m-%d")
+        
+        if last_data_date != today_str:
+            market_status_msg = f"⚠️ API LAG: yfinance stuck on {last_data_date}. Waiting for live sync..."
+            is_safe_to_buy = False 
+        else:
+            nifty_sma20 = nifty_closes.rolling(20).mean().iloc[-1]
+            nifty_curr = nifty_closes.iloc[-1]
+            nifty_prev = nifty_closes.iloc[-2]
+            
+            if len(nifty_closes) > 5:
+                nifty_5d_prev = nifty_closes.iloc[-6]
+                nifty_5d_trend = ((nifty_curr - nifty_5d_prev) / nifty_5d_prev) * 100
+            
+            intraday_pct = ((nifty_curr - nifty_prev) / nifty_prev) * 100
+            is_macro_bullish = nifty_curr > nifty_sma20
+            is_bleeding = intraday_pct < -0.3
+            
+            is_safe_to_buy = is_macro_bullish and not is_bleeding
+            
+            if is_bleeding:
+                market_status_msg = f"🔴 CRITICAL: NIFTY BLEEDING ({intraday_pct:.2f}%). ALL BUYING HALTED."
+            elif not is_macro_bullish:
+                market_status_msg = f"🔴 MARKET MOOD: BEARISH (Below 20 SMA). Buying Paused."
+            else:
+                market_status_msg = f"🟢 MARKET MOOD: BULLISH (Up {intraday_pct:.2f}%)"
+else:
+    if now.time() < datetime.time(9, 15): 
+        market_status_msg = "🌙 PRE-MARKET: Waiting for 9:15 AM..."
+    else: 
+        market_status_msg = "⚠️ NIFTY DATA ERROR (Running Safe Mode)"
 c1, c2 = st.columns([3, 1])
 with c1:
     st.title("☁️ Elite Quant Terminal")
