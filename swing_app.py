@@ -199,8 +199,6 @@ with st.sidebar:
                     st.session_state.db_connected = False
                     st.error("❌ Failed")
 
-        # --- PASTE THE NEW OVERRIDE UI HERE ---
-        # Notice how st.divider() aligns with the 'w' in 'with st.expander'
         st.divider()
         st.subheader("🛠️ Emergency API Override")
         use_manual_nifty = st.checkbox("Force Manual Nifty Data", help="Check this if yfinance is frozen or showing old dates.")
