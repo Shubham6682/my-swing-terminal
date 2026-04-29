@@ -5,4 +5,5 @@ numpy
 streamlit-autorefresh
 gspread
 oauth2client
-dhanhq
+xgboost==2.0.3
+joblib==1.3.2
