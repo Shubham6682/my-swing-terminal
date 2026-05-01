@@ -532,7 +532,12 @@ with tab2:
     if st.session_state.portfolio:
         tickers = [f"{str(p['Ticker']).replace(' ', '').replace('.NS', '')}.NS" for p in st.session_state.portfolio]
         try:
+            # 1. Try to get live minute-by-minute data first
             live_data = yf.download(tickers, period="1d", interval="1m", threads=False, progress=False)['Close']
+            
+            # 2. 🟢 THE FALLBACK: If market is closed (holiday/weekend), grab the last daily close
+            if live_data.empty:
+                live_data = yf.download(tickers, period="5d", interval="1d", threads=False, progress=False)['Close']
         except: 
             live_data = pd.DataFrame()
         
