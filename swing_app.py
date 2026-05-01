@@ -542,60 +542,84 @@ with tab2:
     else: 
         st.info("Portfolio Empty. Go to Scanner to find stocks.")
 
-# --- TAB 3: ANALYSIS ---
+# --- TAB 3: AI CALIBRATION DECK ---
 with tab3:
-    if st.session_state.journal:
-        df_j = pd.DataFrame(st.session_state.journal)
-        
-        if 'PnL' in df_j.columns:
-            df_j['PnL'] = df_j['PnL'].astype(str).str.replace(r'[₹,a-zA-Z\s]', '', regex=True)
-            df_j['PnL'] = pd.to_numeric(df_j['PnL'], errors='coerce').fillna(0)
-        else:
-            df_j['PnL'] = 0
+    st.header("🧠 AI Calibration Deck")
+    st.markdown("Analyze your model's accuracy, simulate strictness thresholds, and track vetoed setups.")
+    st.divider()
 
-        df_j['ExitDate'] = pd.to_datetime(df_j['ExitDate'], errors='coerce')
-        curr_trades = df_j[df_j['ExitDate'].notnull()]
+    # Load both the live Journal and the Ghost Portfolio
+    df_j = pd.DataFrame(st.session_state.journal) if st.session_state.journal else pd.DataFrame()
+    veto_data = fetch_sheet_data("AI_Veto_Log")
+    df_v = pd.DataFrame(veto_data) if veto_data else pd.DataFrame()
+
+    if not df_j.empty and 'PnL' in df_j.columns:
+        # Clean the PnL data
+        df_j['PnL'] = df_j['PnL'].astype(str).str.replace(r'[₹,a-zA-Z\s]', '', regex=True)
+        df_j['PnL'] = pd.to_numeric(df_j['PnL'], errors='coerce').fillna(0)
         
-        if not curr_trades.empty:
-            pnl = curr_trades['PnL'].sum()
-            wins = len(curr_trades[curr_trades['PnL'] > 0])
-            total = len(curr_trades)
-            rate = (wins / total) * 100 if total > 0 else 0
-            
-            k1, k2, k3 = st.columns(3)
-            k1.metric("Net Profit (All Time)", f"₹{pnl:,.2f}")
-            k2.metric("Total Trades", total)
-            k3.metric("Win Rate", f"{rate:.1f}%")
-            st.bar_chart(curr_trades, x="Symbol", y="PnL")
-            
-            st.divider()
-            if 'show_audit' not in st.session_state:
-                st.session_state.show_audit = False
-                
-            if st.button("📊 Toggle Deep Performance Audit"):
-                st.session_state.show_audit = not st.session_state.show_audit
-                
-            if st.session_state.show_audit:
-                run_advanced_audit(df_j)
-        else: 
-            st.info("No valid trades found in Journal.")
-        
-        st.divider()
-        c1, c2 = st.columns(2)
+        # Ensure AI Confidence exists for older trades before the upgrade
+        if 'AI_Confidence' not in df_j.columns: df_j['AI_Confidence'] = 70.0
+        df_j['AI_Confidence'] = pd.to_numeric(df_j['AI_Confidence'], errors='coerce').fillna(70.0)
+
+        c1, c2 = st.columns([2, 1])
+
         with c1:
-            st.write("🏆 **All Winners**")
-            winners = df_j[df_j['PnL'] > 0]
-            if not winners.empty:
-                st.dataframe(winners.sort_values('PnL', ascending=False)[['Symbol', 'PnL', 'Strategy']], hide_index=True)
-            else: 
-                st.write("No wins yet.")
+            st.subheader("🎛️ The Threshold Optimizer")
+            st.caption("Simulate how stricter AI standards would have impacted your historical execution.")
             
+            # The Interactive Simulation Slider
+            sim_threshold = st.slider("Minimum AI Confidence Threshold (%)", min_value=70.0, max_value=99.0, value=70.0, step=1.0)
+            
+            # Run the mathematical simulation
+            sim_trades = df_j[df_j['AI_Confidence'] >= sim_threshold]
+            vetoed_by_sim = df_j[df_j['AI_Confidence'] < sim_threshold]
+            
+            sim_pnl = sim_trades['PnL'].sum()
+            sim_wins = len(sim_trades[sim_trades['PnL'] > 0])
+            sim_total = len(sim_trades)
+            sim_rate = (sim_wins / sim_total) * 100 if sim_total > 0 else 0.0
+            
+            saved_losses = len(vetoed_by_sim[vetoed_by_sim['PnL'] < 0])
+            missed_wins = len(vetoed_by_sim[vetoed_by_sim['PnL'] > 0])
+            
+            # Live Simulation Metrics
+            k1, k2, k3 = st.columns(3)
+            k1.metric("Simulated Net PnL", f"₹{sim_pnl:,.2f}")
+            k2.metric("Simulated Win Rate", f"{sim_rate:.1f}%")
+            k3.metric("Simulated Trades", sim_total)
+            
+            if sim_threshold > 70.0:
+                st.info(f"💡 **Simulation Result:** By raising your threshold to {sim_threshold}%, you would have avoided **{saved_losses} losing trades**, but missed out on **{missed_wins} winning trades**.")
+            
+            # The Calibration Scatter Plot
+            st.markdown("#### Confidence vs. PnL Distribution")
+            st.scatter_chart(sim_trades, x="AI_Confidence", y="PnL")
+
         with c2:
-            st.write("⚠️ **All Losers**")
-            losers = df_j[df_j['PnL'] < 0]
-            if not losers.empty:
-                st.dataframe(losers.sort_values('PnL')[['Symbol', 'PnL', 'Strategy']], hide_index=True)
-            else: 
-                st.write("No losses yet.")
-    else: 
-        st.info("Journal Empty. Close trades to see analysis.")
+            st.subheader("👻 Ghost Portfolio (Vetoes)")
+            st.caption("Setups that passed Phase 1 technicals but were rejected by the AI.")
+            
+            if not df_v.empty:
+                st.metric("Total Setups Vetoed", len(df_v))
+                
+                # Show the most recently vetoed stocks
+                st.dataframe(
+                    df_v[['Date', 'Symbol', 'AI_Confidence']].sort_values('Date', ascending=False).head(10), 
+                    hide_index=True,
+                    use_container_width=True
+                )
+            else:
+                st.info("No vetoes logged yet. The AI hasn't rejected anything.")
+
+        st.divider()
+        
+        # Keep your Advanced Audit intact at the bottom
+        if 'show_audit' not in st.session_state: st.session_state.show_audit = False
+        if st.button("📊 Toggle Deep Performance Audit"):
+            st.session_state.show_audit = not st.session_state.show_audit
+        if st.session_state.show_audit:
+            run_advanced_audit(df_j)
+
+    else:
+        st.info("Journal Empty. Close some trades to populate the AI Calibration Deck.")
