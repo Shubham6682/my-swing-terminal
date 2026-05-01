@@ -5,14 +5,13 @@ import numpy as np
 import datetime
 import pytz
 import time
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 from streamlit_autorefresh import st_autorefresh
 from analysis import run_advanced_audit
 
 # 🟢 THE MODULAR IMPORTS
 from ai_core import load_ai_brain, ask_ai_gatekeeper
 from indicators import calculate_rsi, calculate_bollinger_width
+from database import init_google_sheet, fetch_sheet_data, save_portfolio_cloud, log_trade_journal, log_ai_veto, log_signal_cloud, load_signals_from_cloud
 
 # --- 1. SYSTEM CONFIGURATION (MUST BE FIRST) ---
 st.set_page_config(page_title="Elite Quant Terminal", layout="wide")
@@ -21,141 +20,18 @@ ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 today_str = now.strftime("%Y-%m-%d")
 
-# Wake the AI Brain up using the imported function
 ai_model = load_ai_brain()
 
 market_open = datetime.time(9, 15)
 market_close = datetime.time(15, 30)
 is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
 
-# --- MARKET HOURS REFRESH LOGIC ---
 if is_market_active:
     st_autorefresh(interval=300000, key="quant_v18_active_only")
 else:
     st.info("🌙 Market is Closed. Auto-refresh is paused to save resources.")
 
-# --- 2. GOOGLE SHEETS ENGINE ---
 if 'db_connected' not in st.session_state: st.session_state.db_connected = False
-
-@st.cache_resource
-def init_google_sheet():
-    try:
-        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
-        client = gspread.authorize(creds)
-        return client
-    except: return None
-
-def fetch_sheet_data(tab_name):
-    try:
-        client = init_google_sheet()
-        if client: 
-            st.session_state.db_connected = True 
-            return client.open("Swing_Trading_DB").worksheet(tab_name).get_all_records()
-    except: 
-        st.session_state.db_connected = False 
-        return []
-    return []
-
-def save_portfolio_cloud(data):
-    if not st.session_state.db_connected: return
-    if data is None: return
-    try:
-        client = init_google_sheet()
-        if client:
-            sheet = client.open("Swing_Trading_DB").worksheet("Portfolio")
-            if len(data) > 0:
-                df = pd.DataFrame(data)
-                df = df.fillna("") 
-                write_data = [df.columns.values.tolist()] + df.values.tolist()
-            else:
-                write_data = [["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "StopPrice", "Strategy", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Trap_Score", "Momentum_Velocity", "AI_Confidence"]]
-            sheet.clear()
-            sheet.update(write_data)
-    except Exception as e: print(f"Cloud Save Error: {e}")
-
-def log_trade_journal(trade):
-    if not st.session_state.db_connected: return False
-    row = [
-        trade.get("Date", ""), trade.get("EntryTime", ""), trade.get("Symbol", ""), trade.get("Ticker", ""),
-        trade.get("Qty", 0), trade.get("BuyPrice", 0.0), trade.get("ExitPrice", 0.0),
-        trade.get("ExitDate", ""), trade.get("ExitTime", ""), trade.get("PnL", 0.0), trade.get("Result", ""),
-        trade.get("Strategy", ""), trade.get("VIX", 0.0), trade.get("Nifty_Trend", 0.0),
-        trade.get("RVol", 0.0), trade.get("RSI", 0.0), trade.get("SMA200_Dist", 0.0),
-        trade.get("SMA20_Dist", 0.0), trade.get("Wick_Reject", 0.0), trade.get("Nifty_5D", 0.0),
-        trade.get("Trap_Score", 0.0), trade.get("Momentum_Velocity", 0.0), trade.get("AI_Confidence", 0.0)
-    ]
-    try:
-        client = init_google_sheet()
-        if client:
-            sheet = client.open("Swing_Trading_DB").worksheet("Journal")
-            if not sheet.row_values(1):
-                headers = ["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "ExitPrice", "ExitDate", "ExitTime", "PnL", "Result", "Strategy", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Trap_Score", "Momentum_Velocity", "AI_Confidence"]
-                sheet.append_row(headers)
-            sheet.append_row(row)
-            return True
-    except: return False
-
-def log_ai_veto(trade):
-    if not st.session_state.db_connected: return False
-    row = [
-        trade.get("Date", ""), trade.get("Time", ""), trade.get("Symbol", ""),
-        trade.get("Price", 0.0), trade.get("AI_Confidence", 0.0),
-        trade.get("VIX", 0.0), trade.get("Nifty_Trend", 0.0),
-        trade.get("RVol", 0.0), trade.get("RSI", 0.0), 
-        trade.get("SMA200_Dist", 0.0), trade.get("SMA20_Dist", 0.0), 
-        trade.get("Wick_Reject", 0.0), trade.get("Nifty_5D", 0.0),
-        trade.get("Trap_Score", 0.0), trade.get("Momentum_Velocity", 0.0),
-        "VETOED"
-    ]
-    try:
-        client = init_google_sheet()
-        if client:
-            sheet = client.open("Swing_Trading_DB").worksheet("AI_Veto_Log")
-            if not sheet.row_values(1):
-                headers = ["Date", "Time", "Symbol", "Price", "AI_Confidence", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Trap_Score", "Momentum_Velocity", "Outcome"]
-                sheet.append_row(headers)
-            sheet.append_row(row)
-            return True
-    except Exception as e: 
-        print(f"Veto Log Error: {e}")
-        return False
-
-def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, price):
-    if not st.session_state.db_connected: return False
-    try:
-        client = init_google_sheet()
-        if client:
-            sheet = client.open("Swing_Trading_DB").worksheet("Signal_Log")
-            all_values = sheet.get_all_values()
-            recent_rows = all_values[-20:] if len(all_values) > 20 else all_values
-            
-            for row in recent_rows:
-                if len(row) > 1 and row[0] == today_str and row[1] == symbol:
-                    return True 
-            
-            if not all_values:
-                headers = ["Date", "Symbol", "Time", "Status", "Nifty_Trend", "VIX", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Price"]
-                sheet.append_row(headers)
-            
-            sheet.append_row([today_str, symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, price])
-            return True 
-    except Exception as e: 
-        print(f"Cloud Log Error: {e}")
-    return False
-
-def load_signals_from_cloud():
-    history = {}
-    try:
-        data = fetch_sheet_data("Signal_Log")
-        if data:
-            df = pd.DataFrame(data)
-            if not df.empty and 'Date' in df.columns:
-                today_data = df[df['Date'] == today_str]
-                for _, row in today_data.iterrows():
-                    history[row['Symbol']] = row['Time']
-    except: pass
-    return history
 
 # --- 3. SESSION STATE ---
 if 'portfolio' not in st.session_state: st.session_state.portfolio = fetch_sheet_data("Portfolio")
@@ -477,7 +353,6 @@ with tab1:
                         }
                         macro_data_for_ai = {'VIX': c_vix, 'Nifty_Trend': n_trend}
 
-                        # 🟢 Using the imported modular AI function
                         is_approved, ai_confidence = ask_ai_gatekeeper(ai_model, stock_data_for_ai, macro_data_for_ai)
 
                         if is_approved:
@@ -532,10 +407,7 @@ with tab2:
     if st.session_state.portfolio:
         tickers = [f"{str(p['Ticker']).replace(' ', '').replace('.NS', '')}.NS" for p in st.session_state.portfolio]
         try:
-            # 1. Try to get live minute-by-minute data first
             live_data = yf.download(tickers, period="1d", interval="1m", threads=False, progress=False)['Close']
-            
-            # 2. 🟢 THE FALLBACK: If market is closed (holiday/weekend), grab the last daily close
             if live_data.empty:
                 live_data = yf.download(tickers, period="5d", interval="1d", threads=False, progress=False)['Close']
         except: 
