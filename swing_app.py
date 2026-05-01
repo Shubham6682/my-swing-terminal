@@ -217,13 +217,14 @@ with tab1:
                             
                             c_status, c_trigger = "⏳ WAIT", 0.0
                             
+                            # --- PHASE 1: TECHNICAL MATH ---
                             if mode == "🛡️ Swing (Sentinel)":
                                 c_high_5d = c_closes.tail(6).iloc[:-1].max()
-                                c_sma200 = c_closes.rolling(200).mean().iloc[-1]
+                                c_sma200_base = c_closes.rolling(200).mean().iloc[-1] if len(c_closes) >= 200 else c_curr_price
                                 c_perf = c_closes.iloc[-1] / c_closes.iloc[-60]
                                 c_trigger = c_high_5d
                                 
-                                if c_curr_price > c_high_5d and c_curr_price > c_sma200 and c_perf > nifty_perf:
+                                if c_curr_price > c_high_5d and c_curr_price > c_sma200_base and c_perf > nifty_perf:
                                     c_status = "🎯 CONFIRMED" if is_safe_to_buy else "⛔ MKT WEAK"
                             else:
                                 c_bb_w = calculate_bollinger_width(c_closes).iloc[-1]
@@ -233,19 +234,57 @@ with tab1:
                                         c_status = "🚀 BREAKOUT"
                                         c_trigger = c_curr_price
                                     else: c_status = "⛔ MKT WEAK"
+
+                            # --- PHASE 2: WAKING UP THE AI BRAIN ---
+                            c_rvol = round(float(c_curr_vol / c_vol_sma20), 2) if c_vol_sma20 > 0 else 1.0
+                            c_sma200_val = c_closes.rolling(200).mean().iloc[-1] if len(c_closes) >= 200 else c_curr_price
+                            c_dist = round(float(((c_curr_price - c_sma200_val) / c_sma200_val) * 100), 2) if c_sma200_val > 0 else 0.0
+                            c_sma20 = c_closes.rolling(20).mean().iloc[-1]
+                            c_sma20_dist = round(float(((c_curr_price - c_sma20) / c_sma20) * 100), 2) if c_sma20 > 0 else 0.0
                             
-                            bg_color = "#d4edda" if c_status in ["🎯 CONFIRMED", "🚀 BREAKOUT"] else ("#fff3cd" if c_status == "👀 WATCH (Squeeze)" else "#f8f9fa")
-                            border_color = "#28a745" if c_status in ["🎯 CONFIRMED", "🚀 BREAKOUT"] else ("#ffeeba" if c_status == "👀 WATCH (Squeeze)" else "#6c757d")
+                            c_highs = c_data['High'].squeeze().dropna()
+                            c_daily_high = float(c_highs.iloc[-1])
+                            c_wick_reject = round(float(((c_daily_high - c_curr_price) / c_daily_high) * 100), 2) if c_daily_high > 0 else 0.0
+                            
+                            c_trap_score = round((c_rvol * c_wick_reject) / (1 + abs(c_sma20_dist)), 2)
+                            c_mom_vel = round(c_rsi * c_rvol, 2)
+                            
+                            n_trend = round(float(intraday_pct), 2)
+                            try: c_vix = round(float(closes['^INDIAVIX'].dropna().iloc[-1]), 2)
+                            except: c_vix = 15.0
+                            
+                            stock_data_for_ai = {
+                                'RVol': c_rvol, 'RSI': c_rsi, 'SMA200_Dist': c_dist,
+                                'SMA20_Dist': c_sma20_dist, 'Wick_Reject': c_wick_reject,
+                                'Trap_Score': c_trap_score, 'Momentum_Velocity': c_mom_vel
+                            }
+                            macro_data_for_ai = {'VIX': c_vix, 'Nifty_Trend': n_trend}
+                            
+                            # Get the AI Verdict
+                            is_approved, ai_confidence = ask_ai_gatekeeper(ai_model, stock_data_for_ai, macro_data_for_ai)
+                            
+                            # --- UI UPDATES BASED ON AI ---
+                            if c_status in ["🎯 CONFIRMED", "🚀 BREAKOUT"]:
+                                if is_approved:
+                                    bg_color, border_color = "#d4edda", "#28a745" # Green (Full Approval)
+                                else:
+                                    bg_color, border_color = "#f8d7da", "#dc3545" # Red (Technical passed, AI Vetoed)
+                            else:
+                                bg_color, border_color = "#f8f9fa", "#6c757d" # Gray (Technical failed)
+
                             vol_surge = (c_curr_vol / c_vol_sma20) * 100 if c_vol_sma20 > 0 else 0
+                            ai_badge = "🟢 AI APPROVED" if is_approved else "🛑 AI VETOED"
                             
                             st.markdown(f"""
                             <div style='border: 2px solid {border_color}; border-radius: 8px; padding: 15px; background-color: {bg_color}; color: #333;'>
                                 <h4 style='margin-top:0px; color: #111;'>{custom_sym} System Diagnostics</h4>
-                                <b>Signal:</b> {c_status} &nbsp;|&nbsp; <b>LTP:</b> ₹{c_curr_price:.2f} &nbsp;|&nbsp; <b>Target/Entry:</b> ₹{c_trigger:.2f}<br>
-                                <b>RSI:</b> {c_rsi:.1f} &nbsp;|&nbsp; <b>Volume Surge:</b> {vol_surge:.0f}%
+                                <b>Phase 1 Technical:</b> {c_status} &nbsp;|&nbsp; <b>LTP:</b> ₹{c_curr_price:.2f}<br>
+                                <b>Phase 2 AI Brain:</b> {ai_confidence}% Confidence ({ai_badge})<br>
+                                <hr style='margin: 8px 0; border-top: 1px solid #ccc;'>
+                                <small><b>RSI:</b> {c_rsi:.1f} &nbsp;|&nbsp; <b>Vol Surge:</b> {vol_surge:.0f}% &nbsp;|&nbsp; <b>Trap Score:</b> {c_trap_score} &nbsp;|&nbsp; <b>Wick Reject:</b> {c_wick_reject}%</small>
                             </div>
                             """, unsafe_allow_html=True)
-                        else: st.warning(f"Not enough historical data to calculate 200 SMA on {custom_sym}.")
+                        else: st.warning(f"Not enough historical data to calculate metrics on {custom_sym}.")
                     else: st.error("Invalid Ticker. Make sure it's an NSE stock.")
                 except Exception as e: st.error(f"Error evaluating {custom_sym}: {e}")
         
