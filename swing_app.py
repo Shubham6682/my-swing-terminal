@@ -6,10 +6,13 @@ import datetime
 import pytz
 import time
 import gspread
-import joblib # 🟢 NEW: Added to read the AI Brain
 from oauth2client.service_account import ServiceAccountCredentials
 from streamlit_autorefresh import st_autorefresh
 from analysis import run_advanced_audit
+
+# 🟢 THE MODULAR IMPORTS
+from ai_core import load_ai_brain, ask_ai_gatekeeper
+from indicators import calculate_rsi, calculate_bollinger_width
 
 # --- 1. SYSTEM CONFIGURATION (MUST BE FIRST) ---
 st.set_page_config(page_title="Elite Quant Terminal", layout="wide")
@@ -18,45 +21,8 @@ ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 today_str = now.strftime("%Y-%m-%d")
 
-# --- 2. THE AI NEURAL LINK (BLOCK 1) ---
-@st.cache_resource
-def load_ai_brain():
-    try:
-        # Streamlit reads the file directly from your GitHub repo
-        model = joblib.load('model_v2_macro.pkl')
-        return model
-    except Exception as e:
-        st.error(f"⚠️ Neural Link Failed: Could not load the AI Brain. {e}")
-        return None
-
+# Wake the AI Brain up using the imported function
 ai_model = load_ai_brain()
-
-# --- 3. THE AI GATEKEEPER (BLOCK 2) ---
-def ask_ai_gatekeeper(stock_data, macro_data):
-    if ai_model is None:
-        return False, 0.0 # Failsafe: Reject if brain is offline
-
-    # Assemble the exact 9 features in the EXACT order from Colab
-    features = pd.DataFrame([{
-        'RVol': stock_data['RVol'],
-        'RSI': stock_data['RSI'],
-        'SMA200_Dist': stock_data['SMA200_Dist'],
-        'SMA20_Dist': stock_data['SMA20_Dist'],
-        'Wick_Reject': stock_data['Wick_Reject'],
-        'Trap_Score': stock_data['Trap_Score'],
-        'Momentum_Velocity': stock_data['Momentum_Velocity'],
-        'VIX': macro_data['VIX'],
-        'Nifty_Trend': macro_data['Nifty_Trend']
-    }])
-
-    # Ask the AI for the Win Probability
-    win_probability = ai_model.predict_proba(features)[0][1] 
-
-    # The 70% Threshold Rule
-    if win_probability >= 0.70:
-        return True, round(win_probability * 100, 2)
-    else:
-        return False, round(win_probability * 100, 2)
 
 market_open = datetime.time(9, 15)
 market_close = datetime.time(15, 30)
@@ -103,7 +69,6 @@ def save_portfolio_cloud(data):
                 df = df.fillna("") 
                 write_data = [df.columns.values.tolist()] + df.values.tolist()
             else:
-                # 🟢 AI UPGRADE: Added AI Features to Portfolio Headers
                 write_data = [["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "StopPrice", "Strategy", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Trap_Score", "Momentum_Velocity", "AI_Confidence"]]
             sheet.clear()
             sheet.update(write_data)
@@ -118,7 +83,6 @@ def log_trade_journal(trade):
         trade.get("Strategy", ""), trade.get("VIX", 0.0), trade.get("Nifty_Trend", 0.0),
         trade.get("RVol", 0.0), trade.get("RSI", 0.0), trade.get("SMA200_Dist", 0.0),
         trade.get("SMA20_Dist", 0.0), trade.get("Wick_Reject", 0.0), trade.get("Nifty_5D", 0.0),
-        # 🟢 AI UPGRADE: Push composite features and confidence to Journal
         trade.get("Trap_Score", 0.0), trade.get("Momentum_Velocity", 0.0), trade.get("AI_Confidence", 0.0)
     ]
     try:
@@ -132,12 +96,8 @@ def log_trade_journal(trade):
             return True
     except: return False
 
-# ==========================================
-# 🟢 STEP 2: THE AI VETO LOGGER
-# ==========================================
 def log_ai_veto(trade):
     if not st.session_state.db_connected: return False
-    
     row = [
         trade.get("Date", ""), trade.get("Time", ""), trade.get("Symbol", ""),
         trade.get("Price", 0.0), trade.get("AI_Confidence", 0.0),
@@ -146,7 +106,7 @@ def log_ai_veto(trade):
         trade.get("SMA200_Dist", 0.0), trade.get("SMA20_Dist", 0.0), 
         trade.get("Wick_Reject", 0.0), trade.get("Nifty_5D", 0.0),
         trade.get("Trap_Score", 0.0), trade.get("Momentum_Velocity", 0.0),
-        "VETOED" # Outcome tracking for next month
+        "VETOED"
     ]
     try:
         client = init_google_sheet()
@@ -163,12 +123,10 @@ def log_ai_veto(trade):
 
 def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, price):
     if not st.session_state.db_connected: return False
-    
     try:
         client = init_google_sheet()
         if client:
             sheet = client.open("Swing_Trading_DB").worksheet("Signal_Log")
-            
             all_values = sheet.get_all_values()
             recent_rows = all_values[-20:] if len(all_values) > 20 else all_values
             
@@ -182,10 +140,8 @@ def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, s
             
             sheet.append_row([today_str, symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, price])
             return True 
-            
     except Exception as e: 
         print(f"Cloud Log Error: {e}")
-        
     return False
 
 def load_signals_from_cloud():
@@ -268,19 +224,7 @@ with st.sidebar:
     manual_intraday = st.number_input("Enter Live Nifty % (e.g., -0.45)", value=0.00, step=0.05)
     manual_5d = st.number_input("Enter 5-Day Nifty % (e.g., -2.10)", value=0.00, step=0.05)
 
-# --- 5. INDICATORS & MARKET DATA ---
-def calculate_rsi(series, period=14):
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-def calculate_bollinger_width(series, period=20):
-    sma = series.rolling(window=period).mean()
-    std = series.rolling(window=period).std()
-    return ((sma + (2 * std)) - (sma - (2 * std))) / sma
-
+# --- 5. MARKET DATA & SHIELD ---
 NIFTY_50 = ["ADANIENT", "ADANIPORTS", "APOLLOHOSP", "ASIANPAINT", "AXISBANK", "BAJAJ-AUTO", "BAJFINANCE", "BAJAJFINSV", "BEL", "BPCL", "BHARTIARTL", "BRITANNIA", "CIPLA", "COALINDIA", "DRREDDY", "EICHERMOT", "GRASIM", "HCLTECH", "HDFCBANK", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "ICICIBANK", "ITC", "INDUSINDBK", "INFY", "JSWSTEEL", "KOTAKBANK", "LT", "LTIM", "M&M", "MARUTI", "NTPC", "NESTLEIND", "ONGC", "POWERGRID", "RELIANCE", "SBILIFE", "SHRIRAMFIN", "SBIN", "SUNPHARMA", "TCS", "TATACONSUM", "TATAMOTORS", "TATASTEEL", "TECHM", "TITAN", "ULTRACEMCO", "WIPRO"]
 TICKERS = [f"{t}.NS" for t in NIFTY_50]
 
@@ -292,10 +236,8 @@ def get_market_data():
         return data['Close'], data['Volume'], data['High']
     except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-# Unpack all 3 datasets
 closes, volumes, highs = get_market_data()
 
-# --- MASTER NIFTY LOGIC (SHIELD + OVERRIDE) ---
 nifty_5d_trend = 0.0  
 intraday_pct = 0.0    
 is_safe_to_buy = False
@@ -304,22 +246,16 @@ market_status_msg = "⚪ MARKET DATA LOADING..."
 if use_manual_nifty:
     intraday_pct = float(manual_intraday)
     nifty_5d_trend = float(manual_5d)
-    
     is_bleeding = intraday_pct < -0.3
     is_macro_bullish = True 
     is_safe_to_buy = not is_bleeding
-    
-    if is_bleeding:
-        market_status_msg = f"🔴 MANUAL OVERRIDE: Nifty Bleeding ({intraday_pct:.2f}%) - Buying Halted"
-    else:
-        market_status_msg = f"⚠️ MANUAL OVERRIDE ACTIVE: Intraday {intraday_pct}%, 5-Day {nifty_5d_trend}%"
+    if is_bleeding: market_status_msg = f"🔴 MANUAL OVERRIDE: Nifty Bleeding ({intraday_pct:.2f}%) - Buying Halted"
+    else: market_status_msg = f"⚠️ MANUAL OVERRIDE ACTIVE: Intraday {intraday_pct}%, 5-Day {nifty_5d_trend}%"
 
 elif not closes.empty and '^NSEI' in closes.columns:
     nifty_closes = closes['^NSEI'].dropna()
-    
     if len(nifty_closes) > 20:
         last_data_date = nifty_closes.index[-1].tz_localize(None).strftime("%Y-%m-%d")
-        
         if last_data_date != today_str:
             market_status_msg = f"⚠️ API LAG: yfinance stuck on {last_data_date}. Waiting for live sync..."
             is_safe_to_buy = False 
@@ -327,28 +263,19 @@ elif not closes.empty and '^NSEI' in closes.columns:
             nifty_sma20 = nifty_closes.rolling(20).mean().iloc[-1]
             nifty_curr = nifty_closes.iloc[-1]
             nifty_prev = nifty_closes.iloc[-2]
-            
             if len(nifty_closes) > 5:
                 nifty_5d_prev = nifty_closes.iloc[-6]
                 nifty_5d_trend = ((nifty_curr - nifty_5d_prev) / nifty_5d_prev) * 100
-            
             intraday_pct = ((nifty_curr - nifty_prev) / nifty_prev) * 100
             is_macro_bullish = nifty_curr > nifty_sma20
             is_bleeding = intraday_pct < -0.3
-            
             is_safe_to_buy = is_macro_bullish and not is_bleeding
-            
-            if is_bleeding:
-                market_status_msg = f"🔴 CRITICAL: NIFTY BLEEDING ({intraday_pct:.2f}%). ALL BUYING HALTED."
-            elif not is_macro_bullish:
-                market_status_msg = f"🔴 MARKET MOOD: BEARISH (Below 20 SMA). Buying Paused."
-            else:
-                market_status_msg = f"🟢 MARKET MOOD: BULLISH (Up {intraday_pct:.2f}%)"
+            if is_bleeding: market_status_msg = f"🔴 CRITICAL: NIFTY BLEEDING ({intraday_pct:.2f}%). ALL BUYING HALTED."
+            elif not is_macro_bullish: market_status_msg = f"🔴 MARKET MOOD: BEARISH (Below 20 SMA). Buying Paused."
+            else: market_status_msg = f"🟢 MARKET MOOD: BULLISH (Up {intraday_pct:.2f}%)"
 else:
-    if now.time() < datetime.time(9, 15): 
-        market_status_msg = "🌙 PRE-MARKET: Waiting for 9:15 AM..."
-    else: 
-        market_status_msg = "⚠️ NIFTY DATA ERROR (Running Safe Mode)"
+    if now.time() < datetime.time(9, 15): market_status_msg = "🌙 PRE-MARKET: Waiting for 9:15 AM..."
+    else: market_status_msg = "⚠️ NIFTY DATA ERROR (Running Safe Mode)"
 
 c1, c2 = st.columns([3, 1])
 with c1:
@@ -465,7 +392,6 @@ with tab1:
                 
                 status, trigger_price = "⏳ WAIT", 0.0
                 symbol = ticker.replace(".NS", "")
-                
                 raw_technical_trigger = False 
                 
                 if mode == "🛡️ Swing (Sentinel)":
@@ -490,8 +416,7 @@ with tab1:
                         if is_safe_to_buy: 
                             status = "🚀 BREAKOUT"
                             trigger_price = curr_price
-                        else: 
-                            status = "⛔ MKT WEAK"
+                        else: status = "⛔ MKT WEAK"
 
                 gap_pct = ((curr_price - trigger_price) / trigger_price) * 100 if trigger_price > 0 else 0
                 signal_time = "-"
@@ -504,13 +429,10 @@ with tab1:
                 
                 c_rvol = round(float(curr_vol / vol_sma20), 2) if vol_sma20 > 0 else 1.0
                 c_rsi = round(float(calculate_rsi(series).iloc[-1]), 2)
-                
                 c_sma200 = series.rolling(200).mean().iloc[-1]
                 c_dist = round(float(((curr_price - c_sma200) / c_sma200) * 100), 2) if c_sma200 > 0 else 0.0
-                
                 c_sma20 = series.rolling(20).mean().iloc[-1]
                 c_sma20_dist = round(float(((curr_price - c_sma20) / c_sma20) * 100), 2) if c_sma20 > 0 else 0.0
-                
                 daily_high = highs[ticker].dropna().iloc[-1] if not highs[ticker].dropna().empty else curr_price
                 c_wick_reject = round(float(((daily_high - curr_price) / daily_high) * 100), 2) if daily_high > 0 else 0.0
 
@@ -530,12 +452,9 @@ with tab1:
                     
                     if now.time() >= cutoff_now and start_time_obj <= cutoff_start:
                         if raw_technical_trigger:
-                            if curr_vol > vol_sma20: 
-                                status = "✅ STRONG BUY" if is_safe_to_buy else "⛔ MKT WEAK"
-                            else: 
-                                status = "⚠️ LOW VOL"
-                        else:
-                            status = "❌ FAILED SETUP"
+                            if curr_vol > vol_sma20: status = "✅ STRONG BUY" if is_safe_to_buy else "⛔ MKT WEAK"
+                            else: status = "⚠️ LOW VOL"
+                        else: status = "❌ FAILED SETUP"
 
                 scan_results.append({
                     "Stock": symbol, "Status": status, "Signal Time": signal_time,
@@ -544,19 +463,13 @@ with tab1:
                     "Gap %": f"{gap_pct:.1f}%"
                 })
                 
-                # ==========================================
-                # 🟢 3. BUY EXECUTION UPGRADE: The AI Gatekeeper
-                # ==========================================
                 is_afternoon = now.time() >= datetime.time(13, 30)
                 if bot_active and is_afternoon and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
                     if symbol not in current_holdings and symbol not in st.session_state.blacklist:
-                        
-                        # Calculate the engineered features Colab uses
                         c_trap_score = round((c_rvol * c_wick_reject) / (1 + abs(c_sma20_dist)), 2)
                         c_mom_vel = round(c_rsi * c_rvol, 2)
 
-                        # Package the data for the AI exactly like Step 4 in Colab
                         stock_data_for_ai = {
                             'RVol': c_rvol, 'RSI': c_rsi, 'SMA200_Dist': c_dist,
                             'SMA20_Dist': c_sma20_dist, 'Wick_Reject': c_wick_reject,
@@ -564,8 +477,8 @@ with tab1:
                         }
                         macro_data_for_ai = {'VIX': c_vix, 'Nifty_Trend': n_trend}
 
-                        # Ask the Brain
-                        is_approved, ai_confidence = ask_ai_gatekeeper(stock_data_for_ai, macro_data_for_ai)
+                        # 🟢 Using the imported modular AI function
+                        is_approved, ai_confidence = ask_ai_gatekeeper(ai_model, stock_data_for_ai, macro_data_for_ai)
 
                         if is_approved:
                             new_trade = {
@@ -577,16 +490,12 @@ with tab1:
                                 "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
                                 "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel, "AI_Confidence": ai_confidence
                             }
-                            
                             st.session_state.portfolio.append(new_trade)
                             new_trades_added = True
                             st.session_state.notifications.append(f"🟢 {now.strftime('%H:%M')} - AI APPROVED ({ai_confidence}%): {symbol} at ₹{curr_price:.2f}")
                             st.toast(f"🤖 AI Bought: {symbol}")
                         else:
-                            # 1. Send the notification to your dashboard
                             st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - AI VETOED ({ai_confidence}%): {symbol}")
-                            
-                            # 2. Package the exact mathematical setup
                             vetoed_setup = {
                                 "Date": now.strftime("%Y-%m-%d"), "Time": now.strftime("%H:%M:%S"),
                                 "Symbol": symbol, "Price": curr_price, "AI_Confidence": ai_confidence,
@@ -595,8 +504,6 @@ with tab1:
                                 "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
                                 "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel
                             }
-                            
-                            # 3. Send it to the new Google Sheet Tab for V3 training
                             log_ai_veto(vetoed_setup)
             except: continue
 
@@ -624,7 +531,6 @@ with tab1:
 with tab2:
     if st.session_state.portfolio:
         tickers = [f"{str(p['Ticker']).replace(' ', '').replace('.NS', '')}.NS" for p in st.session_state.portfolio]
-        
         try:
             live_data = yf.download(tickers, period="1d", interval="1m", threads=False, progress=False)['Close']
         except: 
@@ -633,7 +539,6 @@ with tab2:
         total_val, total_inv = 0, 0
         portfolio_changed = False
         remaining_stocks = []
-        
         today_pnl = 0.0
         today_count = 0
         winners = 0
@@ -643,19 +548,11 @@ with tab2:
         for i, trade in enumerate(st.session_state.portfolio):
             api_glitch = False
             clean_ticker = f"{str(trade['Ticker']).replace(' ', '').replace('.NS', '')}.NS"
-            
             try:
-                if live_data.empty:
-                    raise ValueError("Empty data")
-                
-                if isinstance(live_data, pd.DataFrame):
-                    price = float(live_data[clean_ticker].dropna().iloc[-1])
-                else:
-                    price = float(live_data.dropna().iloc[-1])
-                    
-                if pd.isna(price): 
-                    raise ValueError("NaN price")
-                    
+                if live_data.empty: raise ValueError("Empty data")
+                if isinstance(live_data, pd.DataFrame): price = float(live_data[clean_ticker].dropna().iloc[-1])
+                else: price = float(live_data.dropna().iloc[-1])
+                if pd.isna(price): raise ValueError("NaN price")
             except Exception as e: 
                 price = float(trade['BuyPrice'])
                 api_glitch = True
@@ -688,7 +585,6 @@ with tab2:
                     if locked_sl > new_sl:
                         new_sl = locked_sl
                         msg = "🪙 LOCKED +2%"
-                
                 elif pnl_pct >= 6.0:
                     trail = round(price * 0.96, 2)
                     if trail > new_sl:
@@ -696,14 +592,12 @@ with tab2:
                         msg = "📈 TRAILING"
                 
                 if price <= new_sl: msg = "❌ STOP HIT"
-                
                 new_sl = round(new_sl, 2)
                 if new_sl != sl:
                     trade['StopPrice'] = new_sl
                     portfolio_changed = True
             
             action_taken = False
-            
             is_already_sold = any(
                 j.get('Symbol') == trade['Symbol'] and str(j.get('ExitDate')) == now.strftime("%Y-%m-%d") 
                 for j in st.session_state.journal
@@ -714,7 +608,6 @@ with tab2:
                 action_taken = True
                 if trade['Symbol'] not in st.session_state.blacklist:
                     st.session_state.blacklist.append(trade['Symbol'])
-            
             elif auto_sell and not api_glitch and (price <= new_sl):
                 closed_trade = trade.copy()
                 closed_trade.update({
@@ -722,7 +615,6 @@ with tab2:
                     'ExitTime': now.strftime("%H:%M:%S"), 'PnL': pnl, 
                     'Result': "WIN" if pnl > 0 else "LOSS"
                 })
-                
                 if log_trade_journal(closed_trade):
                     st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - AUTO-SOLD: {trade['Symbol']} at ₹{price:.2f}")
                     st.session_state.journal.append(closed_trade)
@@ -734,14 +626,9 @@ with tab2:
                 c1, c2, c3, c4, c5 = st.columns(5)
                 c1.write(f"**{trade['Symbol']}**")
                 c2.write(f"Entry: {buy:.2f}")
-                
-                if api_glitch: 
-                    c3.metric("LTP", "API Syncing...", "Holding...")
-                else: 
-                    c3.metric("LTP", f"{price:.2f}", f"{pnl_pct:.2f}%")
-                    
+                if api_glitch: c3.metric("LTP", "API Syncing...", "Holding...")
+                else: c3.metric("LTP", f"{price:.2f}", f"{pnl_pct:.2f}%")
                 c4.metric("Stop Loss", f"{new_sl:.2f}", help="Auto-Managed")
-                
                 if c5.button(f"✅ CLOSE {msg}", key=f"close_{trade['Symbol']}", disabled=api_glitch):
                     closed_trade = trade.copy()
                     closed_trade.update({
@@ -749,7 +636,6 @@ with tab2:
                         'ExitTime': now.strftime("%H:%M:%S"), 'PnL': pnl, 
                         'Result': "WIN" if pnl > 0 else "LOSS"
                     })
-                    
                     if log_trade_journal(closed_trade):
                         st.session_state.notifications.append(f"👤 {now.strftime('%H:%M')} - MANUALLY CLOSED: {trade['Symbol']} at ₹{price:.2f}")
                         st.session_state.blacklist.append(trade['Symbol'])
@@ -770,16 +656,11 @@ with tab2:
             st.markdown("### 📊 Live Portfolio Health")
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Total Capital Deployed", f"₹{total_inv:,.2f}")
-            
             total_floating_pnl = total_val - total_inv
             total_roi_pct = (total_floating_pnl / total_inv) * 100 if total_inv > 0 else 0.0
             c2.metric("Total Floating PnL", f"₹{total_floating_pnl:,.2f}", f"{total_roi_pct:.2f}% Overall")
-            
-            if today_pnl >= 0: 
-                c3.metric(f"Today's PnL ({today_count} trades)", f"₹{today_pnl:,.2f}", "📈 Sourced Today")
-            else: 
-                c3.metric(f"Today's PnL ({today_count} trades)", f"₹{today_pnl:,.2f}", "📉 Sourced Today")
-                
+            if today_pnl >= 0: c3.metric(f"Today's PnL ({today_count} trades)", f"₹{today_pnl:,.2f}", "📈 Sourced Today")
+            else: c3.metric(f"Today's PnL ({today_count} trades)", f"₹{today_pnl:,.2f}", "📉 Sourced Today")
             c4.metric("Live Market Heat", f"{winners} Green / {losers} Red", border=True)
     else: 
         st.info("Portfolio Empty. Go to Scanner to find stocks.")
