@@ -132,6 +132,35 @@ def log_trade_journal(trade):
             return True
     except: return False
 
+# ==========================================
+# 🟢 STEP 2: THE AI VETO LOGGER
+# ==========================================
+def log_ai_veto(trade):
+    if not st.session_state.db_connected: return False
+    
+    row = [
+        trade.get("Date", ""), trade.get("Time", ""), trade.get("Symbol", ""),
+        trade.get("Price", 0.0), trade.get("AI_Confidence", 0.0),
+        trade.get("VIX", 0.0), trade.get("Nifty_Trend", 0.0),
+        trade.get("RVol", 0.0), trade.get("RSI", 0.0), 
+        trade.get("SMA200_Dist", 0.0), trade.get("SMA20_Dist", 0.0), 
+        trade.get("Wick_Reject", 0.0), trade.get("Nifty_5D", 0.0),
+        trade.get("Trap_Score", 0.0), trade.get("Momentum_Velocity", 0.0),
+        "VETOED" # Outcome tracking for next month
+    ]
+    try:
+        client = init_google_sheet()
+        if client:
+            sheet = client.open("Swing_Trading_DB").worksheet("AI_Veto_Log")
+            if not sheet.row_values(1):
+                headers = ["Date", "Time", "Symbol", "Price", "AI_Confidence", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Trap_Score", "Momentum_Velocity", "Outcome"]
+                sheet.append_row(headers)
+            sheet.append_row(row)
+            return True
+    except Exception as e: 
+        print(f"Veto Log Error: {e}")
+        return False
+
 def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, price):
     if not st.session_state.db_connected: return False
     
@@ -554,8 +583,21 @@ with tab1:
                             st.session_state.notifications.append(f"🟢 {now.strftime('%H:%M')} - AI APPROVED ({ai_confidence}%): {symbol} at ₹{curr_price:.2f}")
                             st.toast(f"🤖 AI Bought: {symbol}")
                         else:
+                            # 1. Send the notification to your dashboard
                             st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - AI VETOED ({ai_confidence}%): {symbol}")
-
+                            
+                            # 2. Package the exact mathematical setup
+                            vetoed_setup = {
+                                "Date": now.strftime("%Y-%m-%d"), "Time": now.strftime("%H:%M:%S"),
+                                "Symbol": symbol, "Price": curr_price, "AI_Confidence": ai_confidence,
+                                "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
+                                "RSI": c_rsi, "SMA200_Dist": c_dist,
+                                "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
+                                "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel
+                            }
+                            
+                            # 3. Send it to the new Google Sheet Tab for V3 training
+                            log_ai_veto(vetoed_setup)
             except: continue
 
         if scan_results:
