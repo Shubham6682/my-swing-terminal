@@ -278,7 +278,7 @@ with tab1:
                             st.markdown(f"""
                             <div style='border: 2px solid {border_color}; border-radius: 8px; padding: 15px; background-color: {bg_color}; color: #333;'>
                                 <h4 style='margin-top:0px; color: #111;'>{custom_sym} System Diagnostics</h4>
-                                <b>Phase 1 Technical:</b> {c_status} &nbsp;|&nbsp; <b>LTP:</b> ₹{c_curr_price:.2f}<br>
+                                <b>Phase 1 Technical:</b> {c_status} &nbsp;|&nbsp; <b>LTP:</b> ₹{c_curr_price:.2f} &nbsp;|&nbsp; <b>Target/Entry:</b> ₹{c_trigger:.2f}<br>
                                 <b>Phase 2 AI Brain:</b> {ai_confidence}% Confidence ({ai_badge})<br>
                                 <hr style='margin: 8px 0; border-top: 1px solid #ccc;'>
                                 <small><b>RSI:</b> {c_rsi:.1f} &nbsp;|&nbsp; <b>Vol Surge:</b> {vol_surge:.0f}% &nbsp;|&nbsp; <b>Trap Score:</b> {c_trap_score} &nbsp;|&nbsp; <b>Wick Reject:</b> {c_wick_reject}%</small>
