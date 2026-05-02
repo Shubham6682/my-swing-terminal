@@ -38,12 +38,15 @@ if 'portfolio' not in st.session_state: st.session_state.portfolio = fetch_sheet
 if 'journal' not in st.session_state: st.session_state.journal = fetch_sheet_data("Journal")
 if 'blacklist' not in st.session_state: st.session_state.blacklist = []
 if 'notifications' not in st.session_state: st.session_state.notifications = []
+if 'vetoed_today' not in st.session_state: st.session_state.vetoed_today = [] # 🟢 VULNERABILITY 2: Memory Bank added
 
+# Reset everything if it is a new day
 if 'last_run_date' not in st.session_state or st.session_state.last_run_date != today_str:
     st.session_state.last_run_date = today_str
     st.session_state.signal_history = load_signals_from_cloud()
     st.session_state.blacklist = []
     st.session_state.notifications = []
+    st.session_state.vetoed_today = [] # 🟢 VULNERABILITY 2: Wipe memory at midnight
 
 # --- 4. SIDEBAR & NOTIFICATIONS ---
 with st.sidebar:
@@ -409,16 +412,26 @@ with tab1:
                             st.session_state.notifications.append(f"🟢 {now.strftime('%H:%M')} - AI APPROVED ({ai_confidence}%): {symbol} at ₹{curr_price:.2f}")
                             st.toast(f"🤖 AI Bought: {symbol}")
                         else:
-                            st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - AI VETOED ({ai_confidence}%): {symbol}")
-                            vetoed_setup = {
-                                "Date": now.strftime("%Y-%m-%d"), "Time": now.strftime("%H:%M:%S"),
-                                "Symbol": symbol, "Price": curr_price, "AI_Confidence": ai_confidence,
-                                "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
-                                "RSI": c_rsi, "SMA200_Dist": c_dist,
-                                "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
-                                "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel
-                            }
-                            log_ai_veto(vetoed_setup)
+                            # 🟢 VULNERABILITY 2: Check memory before logging
+                            if symbol not in st.session_state.vetoed_today:
+                                # 1. Send the notification to your dashboard
+                                st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - AI VETOED ({ai_confidence}%): {symbol}")
+                                
+                                # 2. Package the exact mathematical setup
+                                vetoed_setup = {
+                                    "Date": now.strftime("%Y-%m-%d"), "Time": now.strftime("%H:%M:%S"),
+                                    "Symbol": symbol, "Price": curr_price, "AI_Confidence": ai_confidence,
+                                    "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
+                                    "RSI": c_rsi, "SMA200_Dist": c_dist,
+                                    "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
+                                    "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel
+                                }
+                                
+                                # 3. Send it to the new Google Sheet Tab for V3 training
+                                log_ai_veto(vetoed_setup)
+                                
+                                # 4. Lock the symbol in memory so it doesn't spam on the next 5-min refresh
+                                st.session_state.vetoed_today.append(symbol)
             except: continue
 
         if scan_results:
