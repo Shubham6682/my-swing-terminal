@@ -48,16 +48,19 @@ def save_portfolio_cloud(data):
     except Exception as e: print(f"Cloud Save Error: {e}")
 
 def log_trade_journal(trade):
-    if not st.session_state.get('db_connected', False): return False
+    if not st.session_state.db_connected: return False
+    
+    # 🟢 VULNERABILITY 1 PATCH: Wrapping numbers in float() and int()
     row = [
         trade.get("Date", ""), trade.get("EntryTime", ""), trade.get("Symbol", ""), trade.get("Ticker", ""),
-        trade.get("Qty", 0), trade.get("BuyPrice", 0.0), trade.get("ExitPrice", 0.0),
-        trade.get("ExitDate", ""), trade.get("ExitTime", ""), trade.get("PnL", 0.0), trade.get("Result", ""),
-        trade.get("Strategy", ""), trade.get("VIX", 0.0), trade.get("Nifty_Trend", 0.0),
-        trade.get("RVol", 0.0), trade.get("RSI", 0.0), trade.get("SMA200_Dist", 0.0),
-        trade.get("SMA20_Dist", 0.0), trade.get("Wick_Reject", 0.0), trade.get("Nifty_5D", 0.0),
-        trade.get("Trap_Score", 0.0), trade.get("Momentum_Velocity", 0.0), trade.get("AI_Confidence", 0.0)
+        int(trade.get("Qty", 0)), float(trade.get("BuyPrice", 0.0)), float(trade.get("ExitPrice", 0.0)),
+        trade.get("ExitDate", ""), trade.get("ExitTime", ""), float(trade.get("PnL", 0.0)), trade.get("Result", ""),
+        trade.get("Strategy", ""), float(trade.get("VIX", 0.0)), float(trade.get("Nifty_Trend", 0.0)),
+        float(trade.get("RVol", 0.0)), float(trade.get("RSI", 0.0)), float(trade.get("SMA200_Dist", 0.0)),
+        float(trade.get("SMA20_Dist", 0.0)), float(trade.get("Wick_Reject", 0.0)), float(trade.get("Nifty_5D", 0.0)),
+        float(trade.get("Trap_Score", 0.0)), float(trade.get("Momentum_Velocity", 0.0)), float(trade.get("AI_Confidence", 0.0))
     ]
+    
     try:
         client = init_google_sheet()
         if client:
@@ -68,19 +71,22 @@ def log_trade_journal(trade):
             sheet.append_row(row)
             return True
     except: return False
-
+        
 def log_ai_veto(trade):
-    if not st.session_state.get('db_connected', False): return False
+    if not st.session_state.db_connected: return False
+    
+    # 🟢 VULNERABILITY 1 PATCH: Wrapping numbers in float()
     row = [
         trade.get("Date", ""), trade.get("Time", ""), trade.get("Symbol", ""),
-        trade.get("Price", 0.0), trade.get("AI_Confidence", 0.0),
-        trade.get("VIX", 0.0), trade.get("Nifty_Trend", 0.0),
-        trade.get("RVol", 0.0), trade.get("RSI", 0.0), 
-        trade.get("SMA200_Dist", 0.0), trade.get("SMA20_Dist", 0.0), 
-        trade.get("Wick_Reject", 0.0), trade.get("Nifty_5D", 0.0),
-        trade.get("Trap_Score", 0.0), trade.get("Momentum_Velocity", 0.0),
-        "VETOED"
+        float(trade.get("Price", 0.0)), float(trade.get("AI_Confidence", 0.0)),
+        float(trade.get("VIX", 0.0)), float(trade.get("Nifty_Trend", 0.0)),
+        float(trade.get("RVol", 0.0)), float(trade.get("RSI", 0.0)), 
+        float(trade.get("SMA200_Dist", 0.0)), float(trade.get("SMA20_Dist", 0.0)), 
+        float(trade.get("Wick_Reject", 0.0)), float(trade.get("Nifty_5D", 0.0)),
+        float(trade.get("Trap_Score", 0.0)), float(trade.get("Momentum_Velocity", 0.0)),
+        "VETOED" 
     ]
+    
     try:
         client = init_google_sheet()
         if client:
