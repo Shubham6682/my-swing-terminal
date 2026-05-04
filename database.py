@@ -102,6 +102,13 @@ def log_ai_veto(trade):
 
 def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, price):
     if not st.session_state.get('db_connected', False): return False
+    
+    # 🟢 THE FIX: Force the function to check the live clock right now
+    import datetime
+    import pytz
+    ist = pytz.timezone('Asia/Kolkata')
+    real_today = datetime.datetime.now(ist).strftime("%Y-%m-%d")
+
     try:
         client = init_google_sheet()
         if client:
@@ -110,14 +117,16 @@ def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, s
             recent_rows = all_values[-20:] if len(all_values) > 20 else all_values
             
             for row in recent_rows:
-                if len(row) > 1 and row[0] == today_str and row[1] == symbol:
+                # 🟢 Using real_today instead of the frozen today_str
+                if len(row) > 1 and row[0] == real_today and row[1] == symbol:
                     return True 
             
             if not all_values:
                 headers = ["Date", "Symbol", "Time", "Status", "Nifty_Trend", "VIX", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Price"]
                 sheet.append_row(headers)
             
-            sheet.append_row([today_str, symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, price])
+            # 🟢 Using real_today for the actual log injection
+            sheet.append_row([real_today, symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, price])
             return True 
     except Exception as e: 
         print(f"Cloud Log Error: {e}")
