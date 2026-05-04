@@ -164,13 +164,22 @@ def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, s
 
 def load_signals_from_cloud():
     history = {}
+    
+    # 🟢 THE FIX: Force the function to check the live clock to fetch today's history
+    import datetime
+    import pytz
+    ist = pytz.timezone('Asia/Kolkata')
+    real_today = datetime.datetime.now(ist).strftime("%Y-%m-%d")
+
     try:
         data = fetch_sheet_data("Signal_Log")
         if data:
             df = pd.DataFrame(data)
             if not df.empty and 'Date' in df.columns:
-                today_data = df[df['Date'] == today_str]
+                # 🟢 Filter by real_today instead of the frozen today_str
+                today_data = df[df['Date'] == real_today]
                 for _, row in today_data.iterrows():
-                    history[row['Symbol']] = row['Time']
-    except: pass
+                    history[row['Symbol']] = str(row['Time']) # Force string just in case
+    except Exception as e: 
+        print(f"Error loading history: {e}")
     return history
