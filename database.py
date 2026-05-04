@@ -73,17 +73,31 @@ def log_trade_journal(trade):
     except: return False
         
 def log_ai_veto(trade):
-    if not st.session_state.db_connected: return False
+    if not st.session_state.get('db_connected', False): return False
     
-    # 🟢 VULNERABILITY 1 PATCH: Wrapping numbers in float()
-    row = [
-        trade.get("Date", ""), trade.get("Time", ""), trade.get("Symbol", ""),
-        float(trade.get("Price", 0.0)), float(trade.get("AI_Confidence", 0.0)),
-        float(trade.get("VIX", 0.0)), float(trade.get("Nifty_Trend", 0.0)),
-        float(trade.get("RVol", 0.0)), float(trade.get("RSI", 0.0)), 
-        float(trade.get("SMA200_Dist", 0.0)), float(trade.get("SMA20_Dist", 0.0)), 
-        float(trade.get("Wick_Reject", 0.0)), float(trade.get("Nifty_5D", 0.0)),
-        float(trade.get("Trap_Score", 0.0)), float(trade.get("Momentum_Velocity", 0.0)),
+    # 1. Grab the live system clock
+    import datetime
+    import pytz
+    ist = pytz.timezone('Asia/Kolkata')
+    real_today = datetime.datetime.now(ist).strftime("%Y-%m-%d")
+    
+    # 2. Package the row EXACTLY like your old code, keeping your float() wraps and "Outcome"
+    row_data = [
+        real_today,  # 🟢 Using live clock instead of trade.get("Date")
+        trade.get("Time", ""), 
+        trade.get("Symbol", ""),
+        float(trade.get("Price", 0.0)), 
+        float(trade.get("AI_Confidence", 0.0)),
+        float(trade.get("VIX", 0.0)), 
+        float(trade.get("Nifty_Trend", 0.0)),
+        float(trade.get("RVol", 0.0)), 
+        float(trade.get("RSI", 0.0)), 
+        float(trade.get("SMA200_Dist", 0.0)), 
+        float(trade.get("SMA20_Dist", 0.0)), 
+        float(trade.get("Wick_Reject", 0.0)), 
+        float(trade.get("Nifty_5D", 0.0)),
+        float(trade.get("Trap_Score", 0.0)), 
+        float(trade.get("Momentum_Velocity", 0.0)),
         "VETOED" 
     ]
     
@@ -91,14 +105,30 @@ def log_ai_veto(trade):
         client = init_google_sheet()
         if client:
             sheet = client.open("Swing_Trading_DB").worksheet("AI_Veto_Log")
-            if not sheet.row_values(1):
+            
+            # 3. Fetch recent rows to check for duplicates
+            all_values = sheet.get_all_values()
+            recent_rows = all_values[-50:] if len(all_values) > 50 else all_values
+            
+            symbol = trade.get("Symbol", "")
+            
+            # 4. THE CLOUD SHIELD: Scan the recent cloud rows
+            for row in recent_rows:
+                # Date is column A (index 0) and Symbol is column C (index 2)
+                if len(row) > 2 and row[0] == real_today and row[2] == symbol:
+                    # Duplicate found! Silently block the database write
+                    return True 
+            
+            # 5. If no duplicate is found, proceed with writing the data
+            if not all_values:
                 headers = ["Date", "Time", "Symbol", "Price", "AI_Confidence", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Trap_Score", "Momentum_Velocity", "Outcome"]
                 sheet.append_row(headers)
-            sheet.append_row(row)
-            return True
+            
+            sheet.append_row(row_data)
+            return True 
     except Exception as e: 
         print(f"Veto Log Error: {e}")
-        return False
+    return False
 
 def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, price):
     if not st.session_state.get('db_connected', False): return False
