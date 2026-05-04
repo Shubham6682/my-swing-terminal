@@ -265,6 +265,7 @@ with tab1:
                             
                             # Get the AI Verdict
                             is_approved, ai_confidence = ask_ai_gatekeeper(ai_model, stock_data_for_ai, macro_data_for_ai)
+                            ai_confidence = round(float(ai_confidence), 2)
                             
                             # --- UI UPDATES BASED ON AI ---
                             if c_status in ["🎯 CONFIRMED", "🚀 BREAKOUT"]:
@@ -396,6 +397,7 @@ with tab1:
                         macro_data_for_ai = {'VIX': c_vix, 'Nifty_Trend': n_trend}
 
                         is_approved, ai_confidence = ask_ai_gatekeeper(ai_model, stock_data_for_ai, macro_data_for_ai)
+                        ai_confidence = round(float(ai_confidence), 2)
 
                         if is_approved:
                             new_trade = {
