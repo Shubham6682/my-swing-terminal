@@ -48,17 +48,32 @@ def save_portfolio_cloud(data):
     except Exception as e: print(f"Cloud Save Error: {e}")
 
 def log_trade_journal(trade):
-    if not st.session_state.db_connected: return False
+    if not st.session_state.get('db_connected', False): return False
     
-    # 🟢 VULNERABILITY 1 PATCH: Wrapping numbers in float() and int()
+    # 🟢 THE FIX: Safe converter functions that catch blank strings and missing data
+    def safe_float(val):
+        try:
+            if val == "" or val is None: return 0.0
+            return float(val)
+        except (ValueError, TypeError):
+            return 0.0
+            
+    def safe_int(val):
+        try:
+            if val == "" or val is None: return 0
+            return int(val)
+        except (ValueError, TypeError):
+            return 0
+
+    # 🟢 Apply the safe converters to your row instead of standard float()/int()
     row = [
         trade.get("Date", ""), trade.get("EntryTime", ""), trade.get("Symbol", ""), trade.get("Ticker", ""),
-        int(trade.get("Qty", 0)), float(trade.get("BuyPrice", 0.0)), float(trade.get("ExitPrice", 0.0)),
-        trade.get("ExitDate", ""), trade.get("ExitTime", ""), float(trade.get("PnL", 0.0)), trade.get("Result", ""),
-        trade.get("Strategy", ""), float(trade.get("VIX", 0.0)), float(trade.get("Nifty_Trend", 0.0)),
-        float(trade.get("RVol", 0.0)), float(trade.get("RSI", 0.0)), float(trade.get("SMA200_Dist", 0.0)),
-        float(trade.get("SMA20_Dist", 0.0)), float(trade.get("Wick_Reject", 0.0)), float(trade.get("Nifty_5D", 0.0)),
-        float(trade.get("Trap_Score", 0.0)), float(trade.get("Momentum_Velocity", 0.0)), float(trade.get("AI_Confidence", 0.0))
+        safe_int(trade.get("Qty", 0)), safe_float(trade.get("BuyPrice", 0.0)), safe_float(trade.get("ExitPrice", 0.0)),
+        trade.get("ExitDate", ""), trade.get("ExitTime", ""), safe_float(trade.get("PnL", 0.0)), trade.get("Result", ""),
+        trade.get("Strategy", ""), safe_float(trade.get("VIX", 0.0)), safe_float(trade.get("Nifty_Trend", 0.0)),
+        safe_float(trade.get("RVol", 0.0)), safe_float(trade.get("RSI", 0.0)), safe_float(trade.get("SMA200_Dist", 0.0)),
+        safe_float(trade.get("SMA20_Dist", 0.0)), safe_float(trade.get("Wick_Reject", 0.0)), safe_float(trade.get("Nifty_5D", 0.0)),
+        safe_float(trade.get("Trap_Score", 0.0)), safe_float(trade.get("Momentum_Velocity", 0.0)), safe_float(trade.get("AI_Confidence", 0.0))
     ]
     
     try:
@@ -70,7 +85,9 @@ def log_trade_journal(trade):
                 sheet.append_row(headers)
             sheet.append_row(row)
             return True
-    except: return False
+    except Exception as e: 
+        print(f"Journal Log Error: {e}")
+        return False
         
 def log_ai_veto(trade):
     if not st.session_state.get('db_connected', False): return False
