@@ -7,6 +7,7 @@ import pytz
 import time
 from streamlit_autorefresh import st_autorefresh
 from analysis import run_advanced_audit
+from ghost_dashboard import render_ghost_portfolio  # 🟢 ADD THIS LINE
 
 # 🟢 THE MODULAR IMPORTS
 from ai_core import load_ai_brain, ask_ai_gatekeeper
@@ -657,7 +658,7 @@ with tab3:
             if not df_v.empty:
                 st.metric("Total Setups Vetoed", len(df_v))
                 
-                # Show the most recently vetoed stocks
+                # 🟢 RESTORED: Show the most recently vetoed stocks
                 st.dataframe(
                     df_v[['Date', 'Symbol', 'AI_Confidence']].sort_values('Date', ascending=False).head(10), 
                     hide_index=True,
@@ -668,10 +669,22 @@ with tab3:
 
         st.divider()
         
-        # Keep your Advanced Audit intact at the bottom
+        # 🟢 THE NEW MODULAR INJECTIONS
+        if 'show_ghost' not in st.session_state: st.session_state.show_ghost = False
         if 'show_audit' not in st.session_state: st.session_state.show_audit = False
-        if st.button("📊 Toggle Deep Performance Audit"):
+
+        # Create two side-by-side buttons for a clean UI
+        c_btn1, c_btn2 = st.columns(2)
+        if c_btn1.button("👻 Toggle Ghost Portfolio Tracker", use_container_width=True):
+            st.session_state.show_ghost = not st.session_state.show_ghost
+            
+        if c_btn2.button("📊 Toggle Deep Performance Audit", use_container_width=True):
             st.session_state.show_audit = not st.session_state.show_audit
+
+        # Render the modules if toggled ON
+        if st.session_state.show_ghost:
+            render_ghost_portfolio()
+
         if st.session_state.show_audit:
             run_advanced_audit(df_j)
 
