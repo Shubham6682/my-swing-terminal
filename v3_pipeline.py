@@ -28,7 +28,7 @@ def build_v3_dataset():
     # 2. LOAD THE LIVE JOURNAL (The AI's Live Trades)
     print("Fetching Live Journal from Cloud Database...")
     # NOTE: Change "Live_Journal" if your Google Sheet tab has a different exact name
-    journal_data = fetch_sheet_data("Live_Journal") 
+    journal_data = fetch_sheet_data("Journal") 
     
     if not journal_data:
         print("⚠️ Warning: No Live Journal data found. Using only Ghost data.")
