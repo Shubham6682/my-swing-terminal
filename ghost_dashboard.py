@@ -53,11 +53,14 @@ def render_ghost_portfolio():
             st.error(f"Market Data Error: {e}")
             live_data = pd.DataFrame()
 
-    # --- 3. THE AI LABELING ENGINE ---
+    # --- 3. THE AI LABELING ENGINE (Trailing Stop Upgraded) ---
     results = []
     missed_winners = 0
     dodged_bullets = 0
     in_progress = 0
+    
+    # 🟢 NEW PARAMETER: Trailing Activation Target
+    trail_activation_pct = 6.0 
     
     for index, row in df_active.iterrows():
         sym = row['Symbol']
@@ -66,9 +69,8 @@ def render_ghost_portfolio():
         veto_date = row['Date'].strftime("%Y-%m-%d")
         
         current_price = entry_price
-        high_since_veto = entry_price
-        low_since_veto = entry_price
         
+        # Safe market data extraction
         if not live_data.empty:
             if len(unique_tickers) == 1:
                 stock_series = live_data.dropna()
@@ -76,46 +78,70 @@ def render_ghost_portfolio():
                 stock_series = live_data[ticker].dropna() if ticker in live_data.columns else pd.Series()
             
             if not stock_series.empty:
+                # Filter strictly for days AFTER the veto
                 post_veto_data = stock_series[stock_series.index.tz_localize(None) >= row['Date']]
+                
                 if not post_veto_data.empty:
                     current_price = float(post_veto_data.iloc[-1])
-                    high_since_veto = float(post_veto_data.max())
-                    low_since_veto = float(post_veto_data.min())
+                    
+                    # --- NEW CHRONOLOGICAL TRAILING SIMULATOR ---
+                    highest_seen = entry_price
+                    trade_active = True
+                    final_exit_price = current_price
+                    status = "In Progress"
+                    truth_label = "⏳ TBD"
+                    
+                    for date, price in post_veto_data.items():
+                        if not trade_active: break
+                        
+                        if price > highest_seen:
+                            highest_seen = price
+                            
+                        live_pct = ((price - entry_price) / entry_price) * 100
+                        peak_pct = ((highest_seen - entry_price) / entry_price) * 100
+                        
+                        # Condition 1: Hard Stop Loss Hit BEFORE trailing activates
+                        if live_pct <= stop_pct and peak_pct < trail_activation_pct:
+                            final_exit_price = price
+                            trade_active = False
+                            status = "🛡️ Dodged Bullet"
+                            truth_label = "0 (Loser)"
+                            dodged_bullets += 1
+                            
+                        # Condition 2: Trailing Stop Logic (Activated at +6%)
+                        elif peak_pct >= trail_activation_pct:
+                            # The stop trails behind the highest peak by the SL percentage (e.g., 3%)
+                            trailing_sl_price = highest_seen * (1 - (abs(stop_pct)/100))
+                            
+                            if price <= trailing_sl_price:
+                                final_exit_price = price
+                                trade_active = False
+                                status = "🚨 Missed Winner (Trailed Out)"
+                                truth_label = "1 (Winner)"
+                                missed_winners += 1
 
-        # Calculate PnL Logic
-        max_gain = ((high_since_veto - entry_price) / entry_price) * 100
-        max_drawdown = ((low_since_veto - entry_price) / entry_price) * 100
-        current_pnl = ((current_price - entry_price) / entry_price) * 100
-        
-        # Determine Truth Label
-        truth_label = "⏳ TBD"
-        status = "In Progress"
-        
-        if max_gain >= target_pct:
-            truth_label = "1 (Winner)"
-            status = "🚨 Missed Winner"
-            missed_winners += 1
-        elif max_drawdown <= stop_pct:
-            truth_label = "0 (Loser)"
-            status = "🛡️ Dodged Bullet"
-            dodged_bullets += 1
-        else:
-            in_progress += 1
+                    # If the loop finishes and trade is still active, it's In Progress
+                    if trade_active:
+                        in_progress += 1
 
-        results.append({
-            "Date Vetoed": veto_date,
-            "Symbol": sym,
-            "Veto Price": round(entry_price, 2),
-            "Current Price": round(current_price, 2),
-            "Live PnL (%)": round(current_pnl, 2),
-            "Max Gain (%)": round(max_gain, 2),
-            "Status": status,
-            "AI_Confidence": row.get('AI_Confidence', 0),
-            "V3_Truth_Label": truth_label
-        })
+                    # Calculate final simulated metrics
+                    simulated_pnl = ((final_exit_price - entry_price) / entry_price) * 100
+                    max_gain = ((highest_seen - entry_price) / entry_price) * 100
+                    
+                    results.append({
+                        "Date Vetoed": veto_date,
+                        "Symbol": sym,
+                        "Veto Price": round(entry_price, 2),
+                        "Simulated Exit": round(final_exit_price, 2),
+                        "Ghost PnL (%)": round(simulated_pnl, 2),
+                        "Peak Reached (%)": round(max_gain, 2),
+                        "Status": status,
+                        "AI_Confidence": row.get('AI_Confidence', 0),
+                        "V3_Truth_Label": truth_label
+                    })
 
     df_results = pd.DataFrame(results)
-
+    
     # --- 4. RENDER UI DASHBOARD ---
     st.divider()
     c1, c2, c3 = st.columns(3)
