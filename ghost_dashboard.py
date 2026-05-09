@@ -59,8 +59,8 @@ def render_ghost_portfolio():
     dodged_bullets = 0
     in_progress = 0
     
-    # 🟢 NEW PARAMETER: Trailing Activation Target
-    trail_activation_pct = 6.0 
+    # 🟢 NEW PARAMETER: Trailing Activation Target connects to Streamlit Slider
+    trail_activation_pct = target_pct
     
     for index, row in df_active.iterrows():
         sym = row['Symbol']
