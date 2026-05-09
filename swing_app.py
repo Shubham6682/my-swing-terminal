@@ -512,13 +512,9 @@ with tab2:
             msg, new_sl = "", sl
             
             if not api_glitch:
-                if pnl_pct >= 4.0 and pnl_pct < 6.0:
-                    locked_sl = round(buy * 1.02, 2)
-                    if locked_sl > new_sl:
-                        new_sl = locked_sl
-                        msg = "🪙 LOCKED +2%"
-                elif pnl_pct >= 6.0:
-                    trail = round(price * 0.96, 2)
+                # The 3-5-3 System: Activates at 5%, Trails by 3%
+                if pnl_pct >= 5.0:
+                    trail = round(price * 0.97, 2)
                     if trail > new_sl:
                         new_sl = trail
                         msg = "📈 TRAILING"
