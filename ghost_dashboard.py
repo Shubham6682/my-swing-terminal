@@ -59,8 +59,8 @@ def render_ghost_portfolio():
     dodged_bullets = 0
     in_progress = 0
     
-    # 🟢 NEW PARAMETER: Trailing Activation Target connects to Streamlit Slider
-    trail_activation_pct = target_pct
+    # 🟢 DYNAMIC PARAMETER: Trailing Activation Target now linked to your Streamlit slider
+    trail_activation_pct = target_pct  
     
     for index, row in df_active.iterrows():
         sym = row['Symbol']
@@ -91,6 +91,9 @@ def render_ghost_portfolio():
                     status = "In Progress"
                     truth_label = "⏳ TBD"
                     
+                    # 🟢 VISUAL TRACKER: Establish the initial hard stop loss
+                    current_active_sl = entry_price * (1 - (abs(stop_pct)/100))
+                    
                     for date, price in post_veto_data.items():
                         if not trade_active: break
                         
@@ -108,10 +111,13 @@ def render_ghost_portfolio():
                             truth_label = "0 (Loser)"
                             dodged_bullets += 1
                             
-                        # Condition 2: Trailing Stop Logic (Activated at +6%)
+                        # Condition 2: Trailing Stop Logic (Activated at +5%)
                         elif peak_pct >= trail_activation_pct:
                             # The stop trails behind the highest peak by the SL percentage (e.g., 3%)
                             trailing_sl_price = highest_seen * (1 - (abs(stop_pct)/100))
+                            
+                            # 🟢 VISUAL TRACKER: Update the variable so we can see it on the dashboard
+                            current_active_sl = trailing_sl_price
                             
                             if price <= trailing_sl_price:
                                 final_exit_price = price
@@ -133,6 +139,7 @@ def render_ghost_portfolio():
                         "Symbol": sym,
                         "Veto Price": round(entry_price, 2),
                         "Simulated Exit": round(final_exit_price, 2),
+                        "Current SL Price": round(current_active_sl, 2), # 🟢 NEW COLUMN EXPOSED!
                         "Ghost PnL (%)": round(simulated_pnl, 2),
                         "Peak Reached (%)": round(max_gain, 2),
                         "Status": status,
@@ -154,7 +161,9 @@ def render_ghost_portfolio():
         elif s['Status'] == '🛡️ Dodged Bullet': return ['background-color: #d4edda; color: #155724'] * len(s)
         else: return [''] * len(s)
 
-    st.dataframe(df_results.style.apply(highlight_status, axis=1), use_container_width=True, hide_index=True)
+    # 🟢 Optional UI Clean up: Reordering columns so Current SL is next to Simulated Exit
+    if not df_results.empty:
+        st.dataframe(df_results.style.apply(highlight_status, axis=1), use_container_width=True, hide_index=True)
 
     # Export Logic
     completed_trades = df_results[df_results['V3_Truth_Label'] != "⏳ TBD"]
