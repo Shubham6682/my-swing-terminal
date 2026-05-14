@@ -5,7 +5,7 @@ import datetime
 import pytz
 from oauth2client.service_account import ServiceAccountCredentials
 
-# Setup timezone and date for the logger
+# 🟢 Global instantiation (Kept for boot logs, but functions will use dynamic time)
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 today_str = now.strftime("%Y-%m-%d")
@@ -50,7 +50,7 @@ def save_portfolio_cloud(data):
 def log_trade_journal(trade):
     if not st.session_state.get('db_connected', False): return False
     
-    # 🟢 THE FIX: Safe converter functions that catch blank strings and missing data
+    # 🟢 Safe converter functions that catch blank strings and missing data
     def safe_float(val):
         try:
             if val == "" or val is None: return 0.0
@@ -65,7 +65,7 @@ def log_trade_journal(trade):
         except (ValueError, TypeError):
             return 0
 
-    # 🟢 Apply the safe converters to your row instead of standard float()/int()
+    # 🟢 Apply the safe converters to your row
     row = [
         trade.get("Date", ""), trade.get("EntryTime", ""), trade.get("Symbol", ""), trade.get("Ticker", ""),
         safe_int(trade.get("Qty", 0)), safe_float(trade.get("BuyPrice", 0.0)), safe_float(trade.get("ExitPrice", 0.0)),
@@ -95,12 +95,12 @@ def log_ai_veto(trade):
     # 1. Grab the live system clock
     import datetime
     import pytz
-    ist = pytz.timezone('Asia/Kolkata')
-    real_today = datetime.datetime.now(ist).strftime("%Y-%m-%d")
+    local_ist = pytz.timezone('Asia/Kolkata')
+    real_today = datetime.datetime.now(local_ist).strftime("%Y-%m-%d")
     
     # 2. Package the row EXACTLY like your old code, keeping your float() wraps and "Outcome"
     row_data = [
-        real_today,  # 🟢 Using live clock instead of trade.get("Date")
+        real_today,  
         trade.get("Time", ""), 
         trade.get("Symbol", ""),
         float(trade.get("Price", 0.0)), 
@@ -131,7 +131,6 @@ def log_ai_veto(trade):
             
             # 4. THE CLOUD SHIELD: Scan the recent cloud rows
             for row in recent_rows:
-                # Date is column A (index 0) and Symbol is column C (index 2)
                 if len(row) > 2 and row[0] == real_today and row[2] == symbol:
                     # Duplicate found! Silently block the database write
                     return True 
@@ -150,11 +149,10 @@ def log_ai_veto(trade):
 def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, price):
     if not st.session_state.get('db_connected', False): return False
     
-    # 🟢 THE FIX: Force the function to check the live clock right now
     import datetime
     import pytz
-    ist = pytz.timezone('Asia/Kolkata')
-    real_today = datetime.datetime.now(ist).strftime("%Y-%m-%d")
+    local_ist = pytz.timezone('Asia/Kolkata')
+    real_today = datetime.datetime.now(local_ist).strftime("%Y-%m-%d")
 
     try:
         client = init_google_sheet()
@@ -164,7 +162,6 @@ def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, s
             recent_rows = all_values[-20:] if len(all_values) > 20 else all_values
             
             for row in recent_rows:
-                # 🟢 Using real_today instead of the frozen today_str
                 if len(row) > 1 and row[0] == real_today and row[1] == symbol:
                     return True 
             
@@ -172,7 +169,6 @@ def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, s
                 headers = ["Date", "Symbol", "Time", "Status", "Nifty_Trend", "VIX", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Price"]
                 sheet.append_row(headers)
             
-            # 🟢 Using real_today for the actual log injection
             sheet.append_row([real_today, symbol, signal_time, status, nifty_trend, vix, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, price])
             return True 
     except Exception as e: 
@@ -182,21 +178,44 @@ def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, s
 def load_signals_from_cloud():
     history = {}
     
-    # 🟢 THE FIX: Force the function to check the live clock to fetch today's history
     import datetime
     import pytz
-    ist = pytz.timezone('Asia/Kolkata')
-    real_today = datetime.datetime.now(ist).strftime("%Y-%m-%d")
+    local_ist = pytz.timezone('Asia/Kolkata')
+    real_today = datetime.datetime.now(local_ist).strftime("%Y-%m-%d")
 
     try:
         data = fetch_sheet_data("Signal_Log")
         if data:
             df = pd.DataFrame(data)
             if not df.empty and 'Date' in df.columns:
-                # 🟢 Filter by real_today instead of the frozen today_str
                 today_data = df[df['Date'] == real_today]
                 for _, row in today_data.iterrows():
                     history[row['Symbol']] = str(row['Time']) # Force string just in case
     except Exception as e: 
         print(f"Error loading history: {e}")
     return history
+
+# 🟢 NEW: V3 Pipeline Data Sync
+def sync_ghost_labels_to_cloud(df_vetoes):
+    """
+    Overwrites the AI_Veto_Log sheet with labeled forward-return data.
+    This creates the explicit Target Variables (1 or 0) required for the XGBoost V3 training.
+    """
+    if not st.session_state.get('db_connected', False): return False
+    if df_vetoes.empty: return False
+    
+    try:
+        client = init_google_sheet()
+        if client:
+            sheet = client.open("Swing_Trading_DB").worksheet("AI_Veto_Log")
+            
+            # Replace NaN values with empty strings for Google Sheets compatibility
+            df_clean = df_vetoes.fillna("")
+            
+            # Clear the old data and rewrite it with the new V3_Truth_Label column included
+            sheet.clear()
+            sheet.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
+            return True
+    except Exception as e:
+        print(f"Ghost Sync Error: {e}")
+    return False
