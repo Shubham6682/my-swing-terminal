@@ -111,12 +111,13 @@ TICKERS = [f"{t}.NS" for t in NIFTY_50]
 @st.cache_data(ttl=60)
 def get_market_data():
     try:
-        if now.time() < datetime.time(9, 0): return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        # 🟢 FIX 1: Extracted 'Open' prices to fix the Wick Math vulnerabilities globally
+        if now.time() < datetime.time(9, 0): return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         data = yf.download(TICKERS + ["^NSEI", "^INDIAVIX"], period="1y", threads=False, progress=False)
-        return data['Close'], data['Volume'], data['High']
-    except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return data['Close'], data['Volume'], data['High'], data['Open']
+    except: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-closes, volumes, highs = get_market_data()
+closes, volumes, highs, opens = get_market_data()
 
 nifty_5d_trend = 0.0  
 intraday_pct = 0.0    
@@ -194,7 +195,9 @@ with tab1:
     try:
         scan_results = []
         new_trades_added = False
-        nifty_perf = 0.0
+        # 🟢 FIX 3: Failsafe set to 999.0 so bleeding stocks do not accidentally pass the Relative Strength check during an API error
+        nifty_perf = 999.0 
+        
         if not closes.empty and '^NSEI' in closes.columns:
              nifty_closes = closes['^NSEI'].dropna()
              if not nifty_closes.empty and len(nifty_closes) > 60:
@@ -209,12 +212,15 @@ with tab1:
             with st.spinner(f"Running quant engine on {custom_sym}..."):
                 try:
                     c_data = yf.download(custom_ticker, period="1y", progress=False, threads=False)
-                    if not c_data.empty and 'Close' in c_data.columns and 'Volume' in c_data.columns:
+                    # 🟢 FIX 1: Ensuring Open is pulled for Custom Ticker
+                    if not c_data.empty and 'Close' in c_data.columns and 'Volume' in c_data.columns and 'Open' in c_data.columns:
                         c_closes = c_data['Close'].squeeze().dropna()
                         c_vols = c_data['Volume'].squeeze().dropna()
+                        c_opens = c_data['Open'].squeeze().dropna()
                         
                         if len(c_closes) > 60:
                             c_curr_price = float(c_closes.iloc[-1])
+                            c_curr_open = float(c_opens.iloc[-1]) # 🟢 Extracted
                             c_curr_vol = float(c_vols.iloc[-1])
                             c_vol_sma20 = float(c_vols.rolling(20).mean().iloc[-1])
                             c_rsi = float(calculate_rsi(c_closes).iloc[-1])
@@ -248,7 +254,10 @@ with tab1:
                             
                             c_highs = c_data['High'].squeeze().dropna()
                             c_daily_high = float(c_highs.iloc[-1])
-                            c_wick_reject = round(float(((c_daily_high - c_curr_price) / c_daily_high) * 100), 2) if c_daily_high > 0 else 0.0
+                            
+                            # 🟢 FIX 1: True Wick Rejection Math
+                            c_candle_top = max(c_curr_price, c_curr_open)
+                            c_wick_reject = round(float(((c_daily_high - c_candle_top) / c_daily_high) * 100), 2) if c_daily_high > 0 else 0.0
                             
                             c_trap_score = round((c_rvol * c_wick_reject) / (1 + abs(c_sma20_dist)), 2)
                             c_mom_vel = round(c_rsi * c_rvol, 2)
@@ -302,9 +311,13 @@ with tab1:
                 if ticker not in closes.columns: continue
                 series = closes[ticker].dropna()
                 vol_series = volumes[ticker].dropna()
+                o_series = opens[ticker].dropna() # 🟢 FIX 1: Open Prices for Scanner
+                
                 if series.empty: continue
                 
                 curr_price = series.iloc[-1]
+                curr_open = o_series.iloc[-1]
+                
                 if pd.isna(curr_price): continue
                 
                 curr_vol = vol_series.iloc[-1]
@@ -354,7 +367,10 @@ with tab1:
                 c_sma20 = series.rolling(20).mean().iloc[-1]
                 c_sma20_dist = round(float(((curr_price - c_sma20) / c_sma20) * 100), 2) if c_sma20 > 0 else 0.0
                 daily_high = highs[ticker].dropna().iloc[-1] if not highs[ticker].dropna().empty else curr_price
-                c_wick_reject = round(float(((daily_high - curr_price) / daily_high) * 100), 2) if daily_high > 0 else 0.0
+                
+                # 🟢 FIX 1: True Wick Rejection Math
+                candle_top = max(curr_price, curr_open)
+                c_wick_reject = round(float(((daily_high - candle_top) / daily_high) * 100), 2) if daily_high > 0 else 0.0
 
                 if raw_technical_trigger:
                     active_symbols_now.append(symbol)
@@ -462,9 +478,8 @@ with tab2:
     if st.session_state.portfolio:
         tickers = [f"{str(p['Ticker']).replace(' ', '').replace('.NS', '')}.NS" for p in st.session_state.portfolio]
         try:
-            live_data = yf.download(tickers, period="1d", interval="1m", threads=False, progress=False)['Close']
-            if live_data.empty:
-                live_data = yf.download(tickers, period="5d", interval="1d", threads=False, progress=False)['Close']
+            # 🟢 FIX 2: Replaced the rate-limited 1-minute interval fetch with a robust 1-day LTP fetch
+            live_data = yf.download(tickers, period="1d", threads=False, progress=False)['Close']
         except: 
             live_data = pd.DataFrame()
         
