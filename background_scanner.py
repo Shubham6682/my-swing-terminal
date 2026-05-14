@@ -15,7 +15,8 @@ print(f"🤖 Shadow Node Booting Up: {today_str} at {current_time_str} IST")
 
 # --- 2. HOLIDAY SENSOR (Safety Lock) ---
 print("Checking Market Status...")
-nifty_check = yf.download("^NSEI", period="1d", progress=False)
+# 🟢 FIX 1: Using Reliance instead of Nifty index to prevent Yahoo Finance intraday API lag
+nifty_check = yf.download("RELIANCE.NS", period="1d", progress=False)
 
 if nifty_check.empty:
     print("Market Closed/Holiday Detected (No Data). Shutting down harvester.")
@@ -39,7 +40,8 @@ all_symbols = tickers + ["^NSEI", "^INDIAVIX"]
 print("Downloading Market Data...")
 try:
     data = yf.download(all_symbols, period="1y", interval="1d", threads=True, progress=False)
-    closes, volumes, highs = data['Close'], data['Volume'], data['High']
+    # 🟢 FIX 2a: Extracted 'Open' prices from the bulk download to fix the wick math
+    closes, volumes, highs, opens = data['Close'], data['Volume'], data['High'], data['Open']
 except Exception as e:
     print(f"API Error: {e}")
     sys.exit()
@@ -69,10 +71,14 @@ for ticker in tickers:
         c_series = closes[ticker].dropna()
         v_series = volumes[ticker].dropna()
         h_series = highs[ticker].dropna()
+        
+        # 🟢 FIX 2b: Create the Open series for the specific ticker
+        o_series = opens[ticker].dropna()
 
         if len(c_series) < 200: continue
 
         curr_price = float(c_series.iloc[-1])
+        curr_open = float(o_series.iloc[-1]) # 🟢 Extracted live open price
         curr_vol = float(v_series.iloc[-1])
         vol_sma20 = float(v_series.rolling(20).mean().iloc[-1])
 
@@ -88,7 +94,10 @@ for ticker in tickers:
         sma20_dist = round(((curr_price - sma20) / sma20) * 100, 2)
 
         daily_high = float(h_series.iloc[-1])
-        wick_reject = round(((daily_high - curr_price) / daily_high) * 100, 2) if daily_high > 0 else 0.0
+        
+        # 🟢 FIX 2c: True Wick Rejection Math (High down to the max of Open or Close)
+        candle_top = max(curr_price, curr_open)
+        wick_reject = round(((daily_high - candle_top) / daily_high) * 100, 2) if daily_high > 0 else 0.0
 
         # 🟢 AI FILTER: Only log "Interesting" anomalies. Ignore boring, flat stocks.
         if c_rvol > 1.2 or c_rsi > 60 or c_rsi < 40 or sma20_dist < -5:
