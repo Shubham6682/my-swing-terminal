@@ -3,7 +3,9 @@ import pandas as pd
 import yfinance as yf
 import datetime
 import pytz
-from database import fetch_sheet_data
+
+# 🟢 FIX: Added the new sync function to the imports
+from database import fetch_sheet_data, sync_ghost_labels_to_cloud
 
 def render_ghost_portfolio():
     ist = pytz.timezone('Asia/Kolkata')
@@ -139,7 +141,7 @@ def render_ghost_portfolio():
                         "Symbol": sym,
                         "Veto Price": round(entry_price, 2),
                         "Simulated Exit": round(final_exit_price, 2),
-                        "Current SL Price": round(current_active_sl, 2), # 🟢 NEW COLUMN EXPOSED!
+                        "Current SL Price": round(current_active_sl, 2),
                         "Ghost PnL (%)": round(simulated_pnl, 2),
                         "Peak Reached (%)": round(max_gain, 2),
                         "Status": status,
@@ -165,13 +167,38 @@ def render_ghost_portfolio():
     if not df_results.empty:
         st.dataframe(df_results.style.apply(highlight_status, axis=1), use_container_width=True, hide_index=True)
 
-    # Export Logic
+    # 🟢 FIX: THE NEW EXPORT & CLOUD SYNC LOGIC
     completed_trades = df_results[df_results['V3_Truth_Label'] != "⏳ TBD"]
     if not completed_trades.empty:
-        st.caption("✅ The AI has definitive feedback data ready for V3 training.")
+        st.divider()
+        st.markdown("### 💾 V3 Training Pipeline")
+        st.caption(f"✅ The AI has {len(completed_trades)} definitive labels ready for V3 training.")
+        
+        # Merge the original raw data with the new calculated labels safely
+        df_original = pd.DataFrame(raw_veto_data).copy()
+        
+        # Map the new labels back to the original database structure using Symbol + Date as a unique key
+        label_mapping = dict(zip(df_results['Symbol'] + df_results['Date Vetoed'], df_results['V3_Truth_Label']))
+        
+        # Format the raw dates to match the mapping string
+        raw_dates = pd.to_datetime(df_original['Date']).dt.strftime("%Y-%m-%d")
+        df_original['V3_Truth_Label'] = (df_original['Symbol'] + raw_dates).map(label_mapping)
+        
+        # Fill missing labels for ones still chopping so they don't break Google Sheets
+        df_original['V3_Truth_Label'] = df_original['V3_Truth_Label'].fillna("⏳ TBD")
+        
+        c1, c2 = st.columns([1, 3])
+        if c1.button("🔄 Sync Labels to Cloud DB", use_container_width=True):
+            with st.spinner("Writing truth labels back to Google Sheets..."):
+                if sync_ghost_labels_to_cloud(df_original):
+                    st.success("✅ Training data permanently locked in the Cloud!")
+                else:
+                    st.error("❌ Failed to sync to Google Sheets.")
+                    
+        # Kept the manual CSV download as a failsafe backup
         csv = completed_trades.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="⬇️ Download Cleaned V3 Training Data (CSV)",
+        c2.download_button(
+            label="⬇️ Download Backup CSV",
             data=csv,
             file_name=f"ai_v3_training_data_{now.strftime('%Y%m%d')}.csv",
             mime="text/csv",
