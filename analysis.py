@@ -118,6 +118,12 @@ def run_advanced_audit(journal_df):
                 tickers = closed_trades['Ticker'].dropna().unique().tolist()
                 hist_data = yf.download(tickers, period="7d", interval="1m", progress=False, threads=True)
                 
+                # 🟢 FIX 2: Check if Yahoo Finance blocked the 1m request
+                if hist_data.empty:
+                    st.error("⚠️ Yahoo Finance API rejected the 1-minute data pull (Rate Limit). Try again later.")
+                    st.session_state.enrichment_run = False
+                    st.rerun()
+                
                 enriched_results = []
                 for _, trade in closed_trades.iterrows():
                     sym, tck = trade['Symbol'], trade['Ticker']
@@ -136,8 +142,12 @@ def run_advanced_audit(journal_df):
                             
                             t_high = hist_data['High'][tck].dropna()
                             t_low = hist_data['Low'][tck].dropna()
-                            t_high.index = t_high.index.tz_localize(None)
-                            t_low.index = t_low.index.tz_localize(None)
+                            
+                            # 🟢 FIX 1: Convert to IST BEFORE removing localization
+                            if t_high.index.tz is not None:
+                                t_high.index = t_high.index.tz_convert('Asia/Kolkata').tz_localize(None)
+                            if t_low.index.tz is not None:
+                                t_low.index = t_low.index.tz_convert('Asia/Kolkata').tz_localize(None)
                             
                             window_h = t_high[(t_high.index >= entry_dt) & (t_high.index <= exit_dt)]
                             window_l = t_low[(t_low.index >= entry_dt) & (t_low.index <= exit_dt)]
@@ -179,7 +189,8 @@ def run_advanced_audit(journal_df):
         
         recs = []
         if avg_missed > 2.5:
-            recs.append(f"🔴 **TIGHTEN TRAILING STOP:** You are leaving **{avg_missed:.2f}%** on the table. Consider lowering the 6.0% threshold.")
+            # 🟢 FIX 3: Corrected the hardcoded text to match the 3-5-3 system target parameters
+            recs.append(f"🔴 **TIGHTEN TRAILING STOP:** You are leaving **{avg_missed:.2f}%** on the table. Consider lowering the 5.0% threshold.")
         elif avg_missed < 1.0:
             recs.append(f"🟢 **TRAILING STOP HEALTHY:** You are catching peaks perfectly ({avg_missed:.2f}% missed).")
         
