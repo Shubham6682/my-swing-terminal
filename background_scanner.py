@@ -15,7 +15,6 @@ print(f"🤖 Shadow Node Booting Up: {today_str} at {current_time_str} IST")
 
 # --- 2. HOLIDAY SENSOR (Safety Lock) ---
 print("Checking Market Status...")
-# 🟢 FIX 1: Using Reliance instead of Nifty index to prevent Yahoo Finance intraday API lag
 nifty_check = yf.download("RELIANCE.NS", period="1d", progress=False)
 
 if nifty_check.empty:
@@ -31,7 +30,6 @@ if latest_date_in_data != today_str:
 print("Market is active. Proceeding with data harvest...")
 
 # --- 3. THE BROAD MARKET UNIVERSE ---
-# Using the top ~150 high-liquidity F&O and Midcap stocks to avoid Yahoo API bans while getting 10x the data
 ticker_string = "RELIANCE,TCS,HDFCBANK,ICICIBANK,BHARTIARTL,SBIN,INFY,LICI,ITC,HINDUNILVR,LT,BAJFINANCE,HCLTECH,MARUTI,SUNPHARMA,TATAMOTORS,M&M,ULTRACEMCO,NTPC,POWERGRID,ASIANPAINT,COALINDIA,ONGC,BAJAJFINSV,ADANIENT,HAL,KOTAKBANK,TITAN,ADANIPORTS,WIPRO,JSWSTEEL,SIEMENS,TATASTEEL,IRFC,LTIM,ZOMATO,IOC,BAJAJ-AUTO,GRASIM,TECHM,BEL,HINDZINC,TRENT,CHOLAFIN,VEDL,DLF,INDUSINDBK,PFC,SBILIFE,RECLTD,HINDALCO,GODREJCP,EICHERMOT,DRREDDY,TVSMOTOR,CIPLA,DIVISLAB,GAIL,INDIGO,APOLLOHOSP,BPCL,BRITANNIA,BOSCHLTD,CUMMINSIND,PIDILITIND,SHRIRAMFIN,TORNTPHARM,HEROMOTOCO,MANAPPURAM,LUPIN,JINDALSTEL,CGPOWER,POLYCAB,BHEL,NHPC,YESBANK,IDFCFIRSTB,SUZLON,RVNL,IREDA,JIOFIN,PAYTM,NYKAA,POLICYBZR"
 tickers = [f"{t}.NS" for t in ticker_string.split(",")]
 all_symbols = tickers + ["^NSEI", "^INDIAVIX"]
@@ -40,25 +38,28 @@ all_symbols = tickers + ["^NSEI", "^INDIAVIX"]
 print("Downloading Market Data...")
 try:
     data = yf.download(all_symbols, period="1y", interval="1d", threads=True, progress=False)
-    # 🟢 FIX 2a: Extracted 'Open' prices from the bulk download to fix the wick math
     closes, volumes, highs, opens = data['Close'], data['Volume'], data['High'], data['Open']
 except Exception as e:
     print(f"API Error: {e}")
     sys.exit()
 
-# Extract Market Context
-nifty_trend, vix = 0.0, 15.0
+# Extract Market Context (Added Nifty_5D)
+nifty_trend, nifty_5d, vix = 0.0, 0.0, 15.0
 try:
     nifty_closes = closes['^NSEI'].dropna()
     nifty_trend = round(((nifty_closes.iloc[-1] - nifty_closes.iloc[-2]) / nifty_closes.iloc[-2]) * 100, 2)
+    if len(nifty_closes) >= 6:
+        nifty_5d = round(((nifty_closes.iloc[-1] - nifty_closes.iloc[-6]) / nifty_closes.iloc[-6]) * 100, 2)
     vix = round(float(closes['^INDIAVIX'].dropna().iloc[-1]), 2)
 except: pass
 
-# --- 5. THE QUANT ENGINE ---
+# --- 5. THE QUANT ENGINE (Upgraded Math) ---
 def calculate_rsi(series, period=14):
     delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    # 🟢 FIX 1: Wilder's Exponential Smoothing
+    gain = (delta.where(delta > 0, 0)).ewm(alpha=1/period, adjust=False).mean()
+    loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/period, adjust=False).mean()
+    loss = loss.replace(0, 1e-10)
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
@@ -71,14 +72,12 @@ for ticker in tickers:
         c_series = closes[ticker].dropna()
         v_series = volumes[ticker].dropna()
         h_series = highs[ticker].dropna()
-        
-        # 🟢 FIX 2b: Create the Open series for the specific ticker
         o_series = opens[ticker].dropna()
 
         if len(c_series) < 200: continue
 
         curr_price = float(c_series.iloc[-1])
-        curr_open = float(o_series.iloc[-1]) # 🟢 Extracted live open price
+        curr_open = float(o_series.iloc[-1]) 
         curr_vol = float(v_series.iloc[-1])
         vol_sma20 = float(v_series.rolling(20).mean().iloc[-1])
 
@@ -94,19 +93,23 @@ for ticker in tickers:
         sma20_dist = round(((curr_price - sma20) / sma20) * 100, 2)
 
         daily_high = float(h_series.iloc[-1])
-        
-        # 🟢 FIX 2c: True Wick Rejection Math (High down to the max of Open or Close)
         candle_top = max(curr_price, curr_open)
         wick_reject = round(((daily_high - candle_top) / daily_high) * 100, 2) if daily_high > 0 else 0.0
 
-        # 🟢 AI FILTER: Only log "Interesting" anomalies. Ignore boring, flat stocks.
+        # 🟢 FIX 2: Added Composite Features
+        c_trap_score = round((c_rvol * wick_reject) / (1 + abs(sma20_dist)), 2)
+        c_mom_vel = round(c_rsi * c_rvol, 2)
+
+        # AI FILTER
         if c_rvol > 1.2 or c_rsi > 60 or c_rsi < 40 or sma20_dist < -5:
             symbol = ticker.replace(".NS", "")
             results.append({
                 "Date": today_str, "Time": current_time_str, "Symbol": symbol,
                 "Nifty_Trend": nifty_trend, "VIX": vix, "RVol": c_rvol, "RSI": c_rsi,
                 "SMA200_Dist": sma200_dist, "SMA20_Dist": sma20_dist, 
-                "Wick_Reject": wick_reject, "Price": round(curr_price, 2)
+                "Wick_Reject": wick_reject, "Nifty_5D": nifty_5d, 
+                "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel, 
+                "Price": round(curr_price, 2)
             })
     except: continue
 
