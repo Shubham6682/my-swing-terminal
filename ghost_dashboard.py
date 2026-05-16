@@ -4,7 +4,7 @@ import yfinance as yf
 import datetime
 import pytz
 
-# 🟢 FIX: Added the new sync function to the imports
+# Added the new sync function to the imports
 from database import fetch_sheet_data, sync_ghost_labels_to_cloud
 
 def render_ghost_portfolio():
@@ -14,7 +14,6 @@ def render_ghost_portfolio():
     st.markdown("### 👻 The Ghost Portfolio (Forward-Return Tracker)")
     st.caption("Tracks vetoed setups to see what the AI missed, creating a labeled feedback loop for V3 training.")
     
-    # Settings tucked into an expander to keep Tab 3 clean
     with st.expander("⚙️ Ghost Tracker Parameters (T+N Rules)", expanded=False):
         c1, c2, c3 = st.columns(3)
         target_pct = c1.slider("Target Profit (%)", 2.0, 10.0, 5.0, step=0.5)
@@ -31,19 +30,11 @@ def render_ghost_portfolio():
 
     df = pd.DataFrame(raw_veto_data)
     
-    # Clean the dataframe
     df['Date'] = pd.to_datetime(df['Date'])
     df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
     
-    # Filter for stocks within our T+N Lifespan
-    cutoff_date = now - datetime.timedelta(days=max_days)
-    cutoff_date = cutoff_date.replace(tzinfo=None)
-    
-    df_active = df[df['Date'] >= cutoff_date].copy()
-
-    if df_active.empty:
-        st.warning(f"No recent vetoes found within the last {max_days} days.")
-        return
+    # We copy the full dataframe (no filtering out old trades) so we can evaluate them for Time Decay
+    df_active = df.copy()
 
     # --- 2. FETCH LIVE MARKET DATA ---
     unique_tickers = [f"{sym}.NS" for sym in df_active['Symbol'].unique()]
@@ -55,13 +46,13 @@ def render_ghost_portfolio():
             st.error(f"Market Data Error: {e}")
             live_data = pd.DataFrame()
 
-    # --- 3. THE AI LABELING ENGINE (Trailing Stop Upgraded) ---
+    # --- 3. THE AI LABELING ENGINE ---
     results = []
     missed_winners = 0
     dodged_bullets = 0
     in_progress = 0
     
-    # 🟢 DYNAMIC PARAMETER: Trailing Activation Target now linked to your Streamlit slider
+    # Trailing Activation Target linked to your Streamlit slider
     trail_activation_pct = target_pct  
     
     for index, row in df_active.iterrows():
@@ -72,7 +63,6 @@ def render_ghost_portfolio():
         
         current_price = entry_price
         
-        # Safe market data extraction
         if not live_data.empty:
             if len(unique_tickers) == 1:
                 stock_series = live_data.dropna()
@@ -80,22 +70,22 @@ def render_ghost_portfolio():
                 stock_series = live_data[ticker].dropna() if ticker in live_data.columns else pd.Series()
             
             if not stock_series.empty:
-                # Filter strictly for days AFTER the veto
                 post_veto_data = stock_series[stock_series.index.tz_localize(None) >= row['Date']]
                 
                 if not post_veto_data.empty:
                     current_price = float(post_veto_data.iloc[-1])
                     
-                    # --- NEW CHRONOLOGICAL TRAILING SIMULATOR ---
+                    # Chronological Trailing Simulator Initial State
                     highest_seen = entry_price
                     trade_active = True
                     final_exit_price = current_price
                     status = "In Progress"
                     truth_label = "⏳ TBD"
-                    
-                    # 🟢 VISUAL TRACKER: Establish the initial hard stop loss
                     current_active_sl = entry_price * (1 - (abs(stop_pct)/100))
                     
+                    # Track days elapsed for the Time Decay check
+                    days_elapsed = (now.replace(tzinfo=None) - row['Date']).days
+
                     for date, price in post_veto_data.items():
                         if not trade_active: break
                         
@@ -109,16 +99,14 @@ def render_ghost_portfolio():
                         if live_pct <= stop_pct and peak_pct < trail_activation_pct:
                             final_exit_price = price
                             trade_active = False
-                            status = "🛡️ Dodged Bullet"
+                            status = "🛡️ Dodged Bullet (Stop Hit)"
                             truth_label = "0 (Loser)"
                             dodged_bullets += 1
                             
-                        # Condition 2: Trailing Stop Logic (Activated at +5%)
+                        # Condition 2: Trailing Stop Logic (Activated at target_pct)
                         elif peak_pct >= trail_activation_pct:
-                            # The stop trails behind the highest peak by the SL percentage (e.g., 3%)
+                            # The stop trails behind the highest peak by the SL percentage
                             trailing_sl_price = highest_seen * (1 - (abs(stop_pct)/100))
-                            
-                            # 🟢 VISUAL TRACKER: Update the variable so we can see it on the dashboard
                             current_active_sl = trailing_sl_price
                             
                             if price <= trailing_sl_price:
@@ -128,9 +116,15 @@ def render_ghost_portfolio():
                                 truth_label = "1 (Winner)"
                                 missed_winners += 1
 
-                    # If the loop finishes and trade is still active, it's In Progress
+                    # 🟢 Reality Check 2: Expiration Logic (Time Decay)
                     if trade_active:
-                        in_progress += 1
+                        if days_elapsed >= max_days:
+                            final_exit_price = current_price
+                            status = "🛡️ Dodged Bullet (Time Decay)"
+                            truth_label = "0 (Loser)"
+                            dodged_bullets += 1
+                        else:
+                            in_progress += 1
 
                     # Calculate final simulated metrics
                     simulated_pnl = ((final_exit_price - entry_price) / entry_price) * 100
@@ -159,47 +153,40 @@ def render_ghost_portfolio():
     c3.metric("⏳ Still Chopping", in_progress)
     
     def highlight_status(s):
-        if s['Status'] == '🚨 Missed Winner': return ['background-color: #f8d7da; color: #721c24'] * len(s)
-        elif s['Status'] == '🛡️ Dodged Bullet': return ['background-color: #d4edda; color: #155724'] * len(s)
+        if 'Missed Winner' in str(s.get('Status', '')): return ['background-color: #f8d7da; color: #721c24'] * len(s)
+        elif 'Dodged Bullet' in str(s.get('Status', '')): return ['background-color: #d4edda; color: #155724'] * len(s)
         else: return [''] * len(s)
 
-    # 🟢 Optional UI Clean up: Reordering columns so Current SL is next to Simulated Exit
     if not df_results.empty:
         st.dataframe(df_results.style.apply(highlight_status, axis=1), use_container_width=True, hide_index=True)
 
-    # 🟢 FIX: THE NEW EXPORT & CLOUD SYNC LOGIC
-    completed_trades = df_results[df_results['V3_Truth_Label'] != "⏳ TBD"]
-    if not completed_trades.empty:
-        st.divider()
-        st.markdown("### 💾 V3 Training Pipeline")
-        st.caption(f"✅ The AI has {len(completed_trades)} definitive labels ready for V3 training.")
-        
-        # Merge the original raw data with the new calculated labels safely
-        df_original = pd.DataFrame(raw_veto_data).copy()
-        
-        # Map the new labels back to the original database structure using Symbol + Date as a unique key
-        label_mapping = dict(zip(df_results['Symbol'] + df_results['Date Vetoed'], df_results['V3_Truth_Label']))
-        
-        # Format the raw dates to match the mapping string
-        raw_dates = pd.to_datetime(df_original['Date']).dt.strftime("%Y-%m-%d")
-        df_original['V3_Truth_Label'] = (df_original['Symbol'] + raw_dates).map(label_mapping)
-        
-        # Fill missing labels for ones still chopping so they don't break Google Sheets
-        df_original['V3_Truth_Label'] = df_original['V3_Truth_Label'].fillna("⏳ TBD")
-        
-        c1, c2 = st.columns([1, 3])
-        if c1.button("🔄 Sync Labels to Cloud DB", use_container_width=True):
-            with st.spinner("Writing truth labels back to Google Sheets..."):
-                if sync_ghost_labels_to_cloud(df_original):
-                    st.success("✅ Training data permanently locked in the Cloud!")
-                else:
-                    st.error("❌ Failed to sync to Google Sheets.")
-                    
-        # Kept the manual CSV download as a failsafe backup
-        csv = completed_trades.to_csv(index=False).encode('utf-8')
-        c2.download_button(
-            label="⬇️ Download Backup CSV",
-            data=csv,
-            file_name=f"ai_v3_training_data_{now.strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-        )
+    # --- 5. CLOUD SYNC LOGIC FOR V3 PIPELINE ---
+    if not df_results.empty:
+        completed_trades = df_results[df_results['V3_Truth_Label'] != "⏳ TBD"]
+        if not completed_trades.empty:
+            st.divider()
+            st.markdown("### 💾 V3 Training Pipeline")
+            st.caption(f"✅ The AI has {len(completed_trades)} definitive labels ready for V3 training.")
+            
+            df_original = pd.DataFrame(raw_veto_data).copy()
+            label_mapping = dict(zip(df_results['Symbol'] + df_results['Date Vetoed'], df_results['V3_Truth_Label']))
+            
+            raw_dates = pd.to_datetime(df_original['Date']).dt.strftime("%Y-%m-%d")
+            df_original['V3_Truth_Label'] = (df_original['Symbol'] + raw_dates).map(label_mapping)
+            df_original['V3_Truth_Label'] = df_original['V3_Truth_Label'].fillna("⏳ TBD")
+            
+            c1, c2 = st.columns([1, 3])
+            if c1.button("🔄 Sync Labels to Cloud DB", use_container_width=True):
+                with st.spinner("Writing truth labels back to Google Sheets..."):
+                    if sync_ghost_labels_to_cloud(df_original):
+                        st.success("✅ Training data permanently locked in the Cloud!")
+                    else:
+                        st.error("❌ Failed to sync to Google Sheets.")
+                        
+            csv = completed_trades.to_csv(index=False).encode('utf-8')
+            c2.download_button(
+                label="⬇️ Download Backup CSV",
+                data=csv,
+                file_name=f"ai_v3_training_data_{now.strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+            )
