@@ -478,7 +478,7 @@ with tab2:
     if st.session_state.portfolio:
         tickers = [f"{str(p['Ticker']).replace(' ', '').replace('.NS', '')}.NS" for p in st.session_state.portfolio]
         try:
-            # 🟢 FIX 2: Replaced the rate-limited 1-minute interval fetch with a robust 1-day LTP fetch
+            # Replaced the rate-limited 1-minute interval fetch with a robust 1-day LTP fetch
             live_data = yf.download(tickers, period="1d", threads=False, progress=False)['Close']
         except: 
             live_data = pd.DataFrame()
@@ -551,12 +551,14 @@ with tab2:
                 action_taken = True
                 if trade['Symbol'] not in st.session_state.blacklist:
                     st.session_state.blacklist.append(trade['Symbol'])
+            
+            # 🟢 AUTO-SELL BLOCK: The AI is allowed to learn from these
             elif auto_sell and not api_glitch and (price <= new_sl):
                 closed_trade = trade.copy()
                 closed_trade.update({
                     'ExitPrice': price, 'ExitDate': now.strftime("%Y-%m-%d"), 
                     'ExitTime': now.strftime("%H:%M:%S"), 'PnL': pnl, 
-                    'Result': "WIN" if pnl > 0 else "LOSS"
+                    'Result': "1 (Winner)" if pnl > 0 else "0 (Loser)"
                 })
                 if log_trade_journal(closed_trade):
                     st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - AUTO-SOLD: {trade['Symbol']} at ₹{price:.2f}")
@@ -572,12 +574,14 @@ with tab2:
                 if api_glitch: c3.metric("LTP", "API Syncing...", "Holding...")
                 else: c3.metric("LTP", f"{price:.2f}", f"{pnl_pct:.2f}%")
                 c4.metric("Stop Loss", f"{new_sl:.2f}", help="Auto-Managed")
+                
+                # 🟢 MANUAL-SELL BLOCK: Quarantined from the AI
                 if c5.button(f"✅ CLOSE {msg}", key=f"close_{trade['Symbol']}", disabled=api_glitch):
                     closed_trade = trade.copy()
                     closed_trade.update({
                         'ExitPrice': price, 'ExitDate': now.strftime("%Y-%m-%d"), 
                         'ExitTime': now.strftime("%H:%M:%S"), 'PnL': pnl, 
-                        'Result': "WIN" if pnl > 0 else "LOSS"
+                        'Result': "MANUAL_WIN" if pnl > 0 else "MANUAL_LOSS"
                     })
                     if log_trade_journal(closed_trade):
                         st.session_state.notifications.append(f"👤 {now.strftime('%H:%M')} - MANUALLY CLOSED: {trade['Symbol']} at ₹{price:.2f}")
