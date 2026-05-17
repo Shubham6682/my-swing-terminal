@@ -25,7 +25,9 @@ def fetch_sheet_data(tab_name):
         if client: 
             st.session_state.db_connected = True 
             return client.open("Swing_Trading_DB").worksheet(tab_name).get_all_records()
-    except: 
+    except Exception as e: 
+        import streamlit as st
+        st.error(f"🚨 DATABASE ERROR in {tab_name}: {e}") # 🟢 THIS WILL EXPOSE THE BUG
         st.session_state.db_connected = False 
         return []
     return []
