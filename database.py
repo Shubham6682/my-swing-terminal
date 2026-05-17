@@ -24,9 +24,8 @@ def fetch_sheet_data(tab_name):
         client = init_google_sheet()
         if client: 
             st.session_state.db_connected = True 
-            return client.open(DB_NAME).worksheet(tab_name).get_all_records()
-    except Exception as e: 
-        st.error(f"🚨 DATABASE ERROR in {tab_name}: {e}")
+            return client.open("Swing_Trading_DB").worksheet(tab_name).get_all_records()
+    except: 
         st.session_state.db_connected = False 
         return []
     return []
