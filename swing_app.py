@@ -616,6 +616,11 @@ with tab2:
 with tab3:
     st.header("🧠 AI Calibration Deck")
     st.markdown("Analyze your model's accuracy, simulate strictness thresholds, and track vetoed setups.")
+
+    # 🟢 PASTE THIS EXACTLY HERE
+    if st.button("🔄 Force Reload Journal DB"):
+        st.cache_resource.clear()
+        st.rerun()
     st.divider()
 
     # Load both the live Journal and the Ghost Portfolio
