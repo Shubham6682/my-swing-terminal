@@ -619,9 +619,9 @@ with tab3:
 
     # 🟢 PASTE THIS EXACTLY HERE
     if st.button("🔄 Force Reload Journal DB"):
-        st.cache_resource.clear()
-        st.rerun()
-    st.divider()
+    st.cache_resource.clear()
+    st.session_state.journal = fetch_sheet_data("Journal")
+    st.rerun()
 
     # Load both the live Journal and the Ghost Portfolio
     df_j = pd.DataFrame(st.session_state.journal) if st.session_state.journal else pd.DataFrame()
