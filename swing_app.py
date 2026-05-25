@@ -617,8 +617,7 @@ with tab3:
     st.header("🧠 AI Calibration Deck")
     st.markdown("Analyze your model's accuracy, simulate strictness thresholds, and track vetoed setups.")
 
-# 🟢 PASTE THIS EXACTLY HERE
-    if st.button("🔄 Force Reload Journal DB"):
+    if st.button("🔄 Force Reload DBs"):
         st.cache_resource.clear()
         st.session_state.journal = fetch_sheet_data("Journal")
         st.rerun()
@@ -629,12 +628,35 @@ with tab3:
     veto_data = fetch_sheet_data("AI_Veto_Log")
     df_v = pd.DataFrame(veto_data) if veto_data else pd.DataFrame()
 
+    # 🟢 1. INDEPENDENT MODULES (These now show regardless of the Journal)
+    if 'show_ghost' not in st.session_state: st.session_state.show_ghost = False
+    if 'show_audit' not in st.session_state: st.session_state.show_audit = False
+
+    c_btn1, c_btn2 = st.columns(2)
+    if c_btn1.button("👻 Toggle Ghost Portfolio Tracker", use_container_width=True):
+        st.session_state.show_ghost = not st.session_state.show_ghost
+        
+    if c_btn2.button("📊 Toggle Deep Performance Audit", use_container_width=True):
+        st.session_state.show_audit = not st.session_state.show_audit
+
+    if st.session_state.show_ghost:
+        render_ghost_portfolio()
+
+    if st.session_state.show_audit:
+        if not df_j.empty and 'PnL' in df_j.columns:
+            run_advanced_audit(df_j)
+        else:
+            st.warning("Not enough closed trades in the Journal to run the Deep Audit.")
+            
+    st.divider()
+
+    # 🟢 2. THE CALIBRATOR (This still requires closed Journal trades)
     if not df_j.empty and 'PnL' in df_j.columns:
         # Clean the PnL data
         df_j['PnL'] = df_j['PnL'].astype(str).str.replace(r'[₹,a-zA-Z\s]', '', regex=True)
         df_j['PnL'] = pd.to_numeric(df_j['PnL'], errors='coerce').fillna(0)
         
-        # Ensure AI Confidence exists for older trades before the upgrade
+        # Ensure AI Confidence exists for older trades
         if 'AI_Confidence' not in df_j.columns: df_j['AI_Confidence'] = 70.0
         df_j['AI_Confidence'] = pd.to_numeric(df_j['AI_Confidence'], errors='coerce').fillna(70.0)
 
@@ -644,10 +666,8 @@ with tab3:
             st.subheader("🎛️ The Threshold Optimizer")
             st.caption("Simulate how stricter AI standards would have impacted your historical execution.")
             
-            # The Interactive Simulation Slider
             sim_threshold = st.slider("Minimum AI Confidence Threshold (%)", min_value=70.0, max_value=99.0, value=70.0, step=1.0)
             
-            # Run the mathematical simulation
             sim_trades = df_j[df_j['AI_Confidence'] >= sim_threshold]
             vetoed_by_sim = df_j[df_j['AI_Confidence'] < sim_threshold]
             
@@ -659,7 +679,6 @@ with tab3:
             saved_losses = len(vetoed_by_sim[vetoed_by_sim['PnL'] < 0])
             missed_wins = len(vetoed_by_sim[vetoed_by_sim['PnL'] > 0])
             
-            # Live Simulation Metrics
             k1, k2, k3 = st.columns(3)
             k1.metric("Simulated Net PnL", f"₹{sim_pnl:,.2f}")
             k2.metric("Simulated Win Rate", f"{sim_rate:.1f}%")
@@ -668,46 +687,19 @@ with tab3:
             if sim_threshold > 70.0:
                 st.info(f"💡 **Simulation Result:** By raising your threshold to {sim_threshold}%, you would have avoided **{saved_losses} losing trades**, but missed out on **{missed_wins} winning trades**.")
             
-            # The Calibration Scatter Plot
             st.markdown("#### Confidence vs. PnL Distribution")
             st.scatter_chart(sim_trades, x="AI_Confidence", y="PnL")
 
         with c2:
-            st.subheader("👻 Ghost Portfolio (Vetoes)")
-            st.caption("Setups that passed Phase 1 technicals but were rejected by the AI.")
-            
+            st.subheader("👻 Ghost Portfolio Preview")
             if not df_v.empty:
                 st.metric("Total Setups Vetoed", len(df_v))
-                
-                # 🟢 RESTORED: Show the most recently vetoed stocks
                 st.dataframe(
                     df_v[['Date', 'Symbol', 'AI_Confidence']].sort_values('Date', ascending=False).head(10), 
                     hide_index=True,
                     use_container_width=True
                 )
             else:
-                st.info("No vetoes logged yet. The AI hasn't rejected anything.")
-
-        st.divider()
-        
-        # 🟢 THE NEW MODULAR INJECTIONS
-        if 'show_ghost' not in st.session_state: st.session_state.show_ghost = False
-        if 'show_audit' not in st.session_state: st.session_state.show_audit = False
-
-        # Create two side-by-side buttons for a clean UI
-        c_btn1, c_btn2 = st.columns(2)
-        if c_btn1.button("👻 Toggle Ghost Portfolio Tracker", use_container_width=True):
-            st.session_state.show_ghost = not st.session_state.show_ghost
-            
-        if c_btn2.button("📊 Toggle Deep Performance Audit", use_container_width=True):
-            st.session_state.show_audit = not st.session_state.show_audit
-
-        # Render the modules if toggled ON
-        if st.session_state.show_ghost:
-            render_ghost_portfolio()
-
-        if st.session_state.show_audit:
-            run_advanced_audit(df_j)
-
+                st.info("No vetoes logged yet.")
     else:
-        st.info("Journal Empty. Close some trades to populate the AI Calibration Deck.")
+        st.info("Journal Empty. Close some trades to unlock the Threshold Optimizer.")
