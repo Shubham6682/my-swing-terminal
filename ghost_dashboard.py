@@ -142,6 +142,20 @@ def render_ghost_portfolio():
                         "AI_Confidence": row.get('AI_Confidence', 0),
                         "V3_Truth_Label": truth_label
                     })
+                # 🟢 THE FIX: Safely render brand-new vetoes while waiting on Yahoo Finance
+                else:
+                    results.append({
+                        "Date Vetoed": veto_date,
+                        "Symbol": sym,
+                        "Veto Price": round(entry_price, 2),
+                        "Simulated Exit": round(entry_price, 2),
+                        "Current SL Price": round(entry_price * (1 - (abs(stop_pct)/100)), 2),
+                        "Ghost PnL (%)": 0.0,
+                        "Peak Reached (%)": 0.0,
+                        "Status": "📡 Syncing Market Data...",
+                        "AI_Confidence": row.get('AI_Confidence', 0),
+                        "V3_Truth_Label": "⏳ TBD"
+                    })
 
     df_results = pd.DataFrame(results)
     
