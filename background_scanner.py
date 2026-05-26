@@ -5,6 +5,9 @@ import pytz
 import os
 import sys
 
+# 🟢 ADD THIS LINE TO IMPORT THE CLOUD FUNCTION
+from database import log_ai_veto
+
 # --- 1. SYSTEM BOOT ---
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
@@ -113,15 +116,29 @@ for ticker in tickers:
             })
     except: continue
 
-# --- 6. SECURE DATA TO CSV ---
+# --- 6. SECURE DATA TO CLOUD & CSV ---
 if results:
     df_results = pd.DataFrame(results)
     file_name = "nifty500_shadow_log.csv"
     
+    # 1. Keep the local CSV backup
     if os.path.exists(file_name):
         df_results.to_csv(file_name, mode='a', header=False, index=False)
     else:
         df_results.to_csv(file_name, mode='w', header=True, index=False)
     print(f"✅ Success! Logged {len(results)} anomalies to {file_name}.")
+    
+    # 🟢 2. THE FIX: Push to Google Sheets for V3 Training
+    cloud_success = 0
+    for trade in results:
+        # The AI didn't explicitly veto these (they are background anomalies), 
+        # so we pass a neutral 50.0% confidence score for the database structure.
+        trade['AI_Confidence'] = 50.0 
+        
+        if log_ai_veto(trade):
+            cloud_success += 1
+            
+    print(f"☁️ Synced {cloud_success}/{len(results)} anomalies to the Cloud Database.")
+
 else:
     print("⚪ Market is quiet. No anomalies detected.")
