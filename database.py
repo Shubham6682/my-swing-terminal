@@ -115,7 +115,7 @@ def log_ai_veto(trade):
         float(trade.get("Nifty_5D", 0.0)),
         float(trade.get("Trap_Score", 0.0)), 
         float(trade.get("Momentum_Velocity", 0.0)),
-        "VETOED" 
+        "⏳ TBD",  # 🟢 THE FIX: Now the labeler will instantly recognize new trades 
     ]
     
     try:
