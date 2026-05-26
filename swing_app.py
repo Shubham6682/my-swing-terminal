@@ -512,6 +512,19 @@ with tab2:
             inv_val = buy * qty
             pnl = cur_val - inv_val
             pnl_pct = (pnl / inv_val) * 100
+
+            # 🟢 1. START MFE/MAE INJECTION
+            if 'Max_Profit_%' not in trade: trade['Max_Profit_%'] = 0.0
+            if 'Max_Drawdown_%' not in trade: trade['Max_Drawdown_%'] = 0.0
+
+            if pnl_pct > trade['Max_Profit_%']:
+                trade['Max_Profit_%'] = round(pnl_pct, 2)
+                portfolio_changed = True
+
+            if pnl_pct < trade['Max_Drawdown_%']:
+                trade['Max_Drawdown_%'] = round(pnl_pct, 2)
+                portfolio_changed = True
+            # 🟢 END MFE/MAE INJECTION
             
             total_val += cur_val
             total_inv += inv_val
