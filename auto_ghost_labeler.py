@@ -25,11 +25,14 @@ def run_automated_labeling():
         return
 
     df = pd.DataFrame(raw_veto_data)
-    if 'V3_Truth_Label' not in df.columns:
-        df['V3_Truth_Label'] = "⏳ TBD"
+    
+    # 🟢 ALIGNED WITH NEW DATABASE SCHEMA
+    if 'Target_Label' not in df.columns: df['Target_Label'] = "⏳ TBD"
+    if 'Max_Profit_%' not in df.columns: df['Max_Profit_%'] = 0.0
+    if 'Max_Drawdown_%' not in df.columns: df['Max_Drawdown_%'] = 0.0
 
     # 2. Isolate only the setups that are still chopping
-    mask_pending = df['V3_Truth_Label'].isin(["", "⏳ TBD", None])
+    mask_pending = df['Target_Label'].isin(["", "⏳ TBD", None])
     df_pending = df[mask_pending].copy()
 
     if df_pending.empty:
@@ -48,19 +51,33 @@ def run_automated_labeling():
         veto_date = row['Date']
         
         try:
-            # Fetch data from the veto date to today
-            stock_data = yf.download(ticker, start=veto_date.strftime("%Y-%m-%d"), progress=False)['Close']
-            if stock_data.empty: continue
+            # 🟢 FIX: Fetch ALL data so we get 'High' and 'Low', not just 'Close'
+            stock_data = yf.download(ticker, start=veto_date.strftime("%Y-%m-%d"), progress=False)
+            if stock_data.empty or 'Close' not in stock_data.columns: continue
                 
             post_veto_data = stock_data[stock_data.index.tz_localize(None) >= veto_date]
             if post_veto_data.empty: continue
+
+            # 🟢 START MFE/MAE INJECTION
+            try:
+                # Calculate absolute extremes across the simulation window
+                highest_price_reached = float(post_veto_data['High'].max())
+                lowest_price_reached = float(post_veto_data['Low'].min())
+                
+                # Push the math directly into your dataframe
+                df.at[index, 'Max_Profit_%'] = round(((highest_price_reached - entry_price) / entry_price) * 100, 2)
+                df.at[index, 'Max_Drawdown_%'] = round(((lowest_price_reached - entry_price) / entry_price) * 100, 2)
+            except Exception as e:
+                print(f"   ⚠️ Could not calculate extremes for {sym}: {e}")
+            # 🟢 END MFE/MAE INJECTION
 
             # --- THE 3-5-3 TRAILING MATH ---
             highest_seen = entry_price
             trade_active = True
             truth_label = "⏳ TBD"
             
-            for date, price in post_veto_data.items():
+            # 🟢 FIX: Specify ['Close'] here because post_veto_data is now a full DataFrame
+            for date, price in post_veto_data['Close'].items():
                 if not trade_active: break
                 
                 current_price = float(price.iloc[0]) if isinstance(price, pd.Series) else float(price)
@@ -87,7 +104,7 @@ def run_automated_labeling():
             
             # Apply update if the label changed from TBD
             if truth_label != "⏳ TBD":
-                df.at[index, 'V3_Truth_Label'] = truth_label
+                df.at[index, 'Target_Label'] = truth_label
                 labels_updated += 1
                 print(f"   ✔️ FINALIZED: {sym} -> {truth_label}")
 
