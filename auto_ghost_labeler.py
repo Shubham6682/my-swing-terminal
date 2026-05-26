@@ -52,7 +52,7 @@ def run_automated_labeling():
             stock_data = yf.download(ticker, start=veto_date.strftime("%Y-%m-%d"), progress=False)['Close']
             if stock_data.empty: continue
                 
-            post_veto_data = stock_data[stock_data.index.tz_localize(None) > veto_date]
+            post_veto_data = stock_data[stock_data.index.tz_localize(None) >= veto_date]
             if post_veto_data.empty: continue
 
             # --- THE 3-5-3 TRAILING MATH ---
@@ -82,7 +82,7 @@ def run_automated_labeling():
                         trade_active = False
 
             # Time-Decay: If T+8 expires without hitting targets, it's a safe veto (Loser)
-            if trade_active and (now - veto_date).days > MAX_DAYS:
+            if trade_active and (now - veto_date).days >= MAX_DAYS:
                 truth_label = "0 (Loser)" 
             
             # Apply update if the label changed from TBD
