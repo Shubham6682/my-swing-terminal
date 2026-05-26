@@ -693,7 +693,5 @@ with tab3:
             st.subheader("👻 Ghost Portfolio Preview")
             st.info("Click 'Toggle Ghost Portfolio Tracker' below to fetch and analyze the latest vetoes from the database.")
             
-            else:
-                st.info("No vetoes logged yet.")
     else:
         st.info("Journal Empty. Close some trades to unlock the Threshold Optimizer.")
