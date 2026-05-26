@@ -90,7 +90,7 @@ def log_trade_journal(trade):
         return False
         
 def log_ai_veto(trade):
-    if not st.session_state.get('db_connected', False): return False
+    
     
     # 1. Grab the live system clock
     import datetime
