@@ -625,8 +625,7 @@ with tab3:
 
     # Load both the live Journal and the Ghost Portfolio
     df_j = pd.DataFrame(st.session_state.journal) if st.session_state.journal else pd.DataFrame()
-    veto_data = fetch_sheet_data("AI_Veto_Log")
-    df_v = pd.DataFrame(veto_data) if veto_data else pd.DataFrame()
+    
 
     # 🟢 1. INDEPENDENT MODULES (These now show regardless of the Journal)
     if 'show_ghost' not in st.session_state: st.session_state.show_ghost = False
@@ -692,13 +691,8 @@ with tab3:
 
         with c2:
             st.subheader("👻 Ghost Portfolio Preview")
-            if not df_v.empty:
-                st.metric("Total Setups Vetoed", len(df_v))
-                st.dataframe(
-                    df_v[['Date', 'Symbol', 'AI_Confidence']].sort_values('Date', ascending=False).head(10), 
-                    hide_index=True,
-                    use_container_width=True
-                )
+            st.info("Click 'Toggle Ghost Portfolio Tracker' below to fetch and analyze the latest vetoes from the database.")
+            
             else:
                 st.info("No vetoes logged yet.")
     else:
