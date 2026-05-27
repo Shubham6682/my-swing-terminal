@@ -571,7 +571,9 @@ with tab2:
                 closed_trade.update({
                     'ExitPrice': price, 'ExitDate': now.strftime("%Y-%m-%d"), 
                     'ExitTime': now.strftime("%H:%M:%S"), 'PnL': pnl, 
-                    'Result': "1 (Winner)" if pnl > 0 else "0 (Loser)"
+                    'Result': "1 (Winner)" if pnl > 0 else "0 (Loser)",
+                    'Max_Profit_%': trade.get('Max_Profit_%', 0.0),
+                    'Max_Drawdown_%': trade.get('Max_Drawdown_%', 0.0)
                 })
                 if log_trade_journal(closed_trade):
                     st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - AUTO-SOLD: {trade['Symbol']} at ₹{price:.2f}")
@@ -594,7 +596,9 @@ with tab2:
                     closed_trade.update({
                         'ExitPrice': price, 'ExitDate': now.strftime("%Y-%m-%d"), 
                         'ExitTime': now.strftime("%H:%M:%S"), 'PnL': pnl, 
-                        'Result': "MANUAL_WIN" if pnl > 0 else "MANUAL_LOSS"
+                        'Result': "MANUAL_WIN" if pnl > 0 else "MANUAL_LOSS",
+                        'Max_Profit_%': trade.get('Max_Profit_%', 0.0),
+                        'Max_Drawdown_%': trade.get('Max_Drawdown_%', 0.0)
                     })
                     if log_trade_journal(closed_trade):
                         st.session_state.notifications.append(f"👤 {now.strftime('%H:%M')} - MANUALLY CLOSED: {trade['Symbol']} at ₹{price:.2f}")
