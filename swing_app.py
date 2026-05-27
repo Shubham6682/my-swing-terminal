@@ -424,7 +424,8 @@ with tab1:
                                 "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
                                 "RSI": c_rsi, "SMA200_Dist": c_dist,
                                 "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
-                                "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel, "AI_Confidence": ai_confidence
+                                "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel, "AI_Confidence": ai_confidence,
+                                "Max_Profit_%": 0.0, "Max_Drawdown_%": 0.0
                             }
                             st.session_state.portfolio.append(new_trade)
                             new_trades_added = True
