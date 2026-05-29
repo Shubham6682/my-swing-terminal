@@ -140,7 +140,7 @@ def render_ghost_portfolio():
                         "Peak Reached (%)": round(max_gain, 2),
                         "Status": status,
                         "AI_Confidence": row.get('AI_Confidence', 0),
-                        "V3_Truth_Label": truth_label
+                        "Target_Label": truth_label
                     })
                 # 🟢 THE FIX: Safely render brand-new vetoes while waiting on Yahoo Finance
                 else:
