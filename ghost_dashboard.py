@@ -154,7 +154,7 @@ def render_ghost_portfolio():
                         "Peak Reached (%)": 0.0,
                         "Status": "📡 Syncing Market Data...",
                         "AI_Confidence": row.get('AI_Confidence', 0),
-                        "V3_Truth_Label": "⏳ TBD"
+                        "Target_Label": "⏳ TBD"
                     })
 
     df_results = pd.DataFrame(results)
@@ -176,18 +176,18 @@ def render_ghost_portfolio():
 
     # --- 5. CLOUD SYNC LOGIC FOR V3 PIPELINE ---
     if not df_results.empty:
-        completed_trades = df_results[df_results['V3_Truth_Label'] != "⏳ TBD"]
+        completed_trades = df_results[df_results['Target_Label'] != "⏳ TBD"]
         if not completed_trades.empty:
             st.divider()
             st.markdown("### 💾 V3 Training Pipeline")
             st.caption(f"✅ The AI has {len(completed_trades)} definitive labels ready for V3 training.")
             
             df_original = pd.DataFrame(raw_veto_data).copy()
-            label_mapping = dict(zip(df_results['Symbol'] + df_results['Date Vetoed'], df_results['V3_Truth_Label']))
+            label_mapping = dict(zip(df_results['Symbol'] + df_results['Date Vetoed'], df_results['Target_Label']))
             
             raw_dates = pd.to_datetime(df_original['Date']).dt.strftime("%Y-%m-%d")
-            df_original['V3_Truth_Label'] = (df_original['Symbol'] + raw_dates).map(label_mapping)
-            df_original['V3_Truth_Label'] = df_original['V3_Truth_Label'].fillna("⏳ TBD")
+            df_original['Target_Label'] = (df_original['Symbol'] + raw_dates).map(label_mapping)
+            df_original['Target_Label'] = df_original['Target_Label'].fillna("⏳ TBD")
             
             c1, c2 = st.columns([1, 3])
             if c1.button("🔄 Sync Labels to Cloud DB", use_container_width=True):
