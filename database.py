@@ -19,16 +19,17 @@ def init_google_sheet():
         
         # 1. Try standard Streamlit approach first (for live UI app)
         try:
-            # Cast to a standard dictionary to ensure gspread accepts it
             creds_dict = dict(st.secrets["gcp_service_account"])
             creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
             client = gspread.authorize(creds)
             return client
         except Exception:
             # 2. Fallback for Bare Python Mode (VS Code Terminal / GitHub Actions)
-            secrets_path = os.path.join(".streamlit", "secrets.toml")
+            # 🟢 THE FIX: Calculate the absolute, explicit path
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            secrets_path = os.path.join(current_dir, ".streamlit", "secrets.toml")
+            
             if os.path.exists(secrets_path):
-                # Use the built-in toml parser instead of manual string slicing
                 with open(secrets_path, "r") as f:
                     secrets = toml.load(f)
                 
@@ -38,12 +39,13 @@ def init_google_sheet():
                     client = gspread.authorize(creds)
                     return client
             
-            print("🔴 Fallback failed: Could not locate or parse .streamlit/secrets.toml")
+            # If it still fails, print the EXACT path it was searching so you can debug
+            print(f"🔴 Fallback failed: Searched for secrets at: {secrets_path}")
             return None
     except Exception as e:
         print(f"🔴 Critical Sheet Auth Error: {e}")
         return None
-
+        
 def fetch_sheet_data(tab_name):
     try:
         client = init_google_sheet()
