@@ -1,3 +1,5 @@
+import os
+import json
 import streamlit as st
 import gspread
 import pandas as pd
@@ -14,10 +16,35 @@ today_str = now.strftime("%Y-%m-%d")
 def init_google_sheet():
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
-        client = gspread.authorize(creds)
-        return client
-    except: return None
+        
+        # 1. Try standard Streamlit approach first (for live UI app)
+        try:
+            creds_dict = st.secrets["gcp_service_account"]
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+            client = gspread.authorize(creds)
+            return client
+        except Exception:
+            # 2. Fallback for Bare Python Mode (VS Code Terminal / GitHub Actions)
+            # Read the secrets file directly since st.secrets is blind here
+            secrets_path = os.path.join(".streamlit", "secrets.toml")
+            if os.path.exists(secrets_path):
+                with open(secrets_path, "r") as f:
+                    content = f.read()
+                
+                # Simple parsing to extract the JSON string from inside the TOML structure
+                if "gcp_service_account" in content:
+                    json_start = content.find("{")
+                    json_end = content.rfind("}") + 1
+                    json_str = content[json_start:json_end]
+                    
+                    creds_dict = json.loads(json_str)
+                    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+                    client = gspread.authorize(creds)
+                    return client
+            return None
+    except Exception as e:
+        print(f"🔴 Critical Sheet Auth Error: {e}")
+        return None
 
 def fetch_sheet_data(tab_name):
     try:
