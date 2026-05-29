@@ -137,7 +137,8 @@ def log_ai_veto(trade):
             
             # 5. If no duplicate is found, proceed with writing the data
             if not all_values:
-                headers = ["Date", "Time", "Symbol", "Price", "AI_Confidence", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Trap_Score", "Momentum_Velocity", "Outcome"]
+                # We are just swapping the final item in this list from "Outcome" to "Target_Label"
+                headers = ["Date", "Time", "Symbol", "Price", "AI_Confidence", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Trap_Score", "Momentum_Velocity", "Target_Label"]
                 sheet.append_row(headers)
             
             sheet.append_row(row_data)
