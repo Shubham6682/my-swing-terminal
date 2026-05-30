@@ -33,7 +33,7 @@ def run_advanced_audit(journal_df):
     elif time_filter == "Last 30 Days":
         df = df[df['ExitDate'] >= (now - pd.Timedelta(days=30))]
     
-    closed_trades = df[df['ExitDate'].notnull() & (df['Result'] != '')].copy()
+    closed_trades = df[df['ExitDate'].notnull() & (df['Target_Label'] != '')].copy()
     
     if closed_trades.empty:
         st.warning(f"Not enough closed trades in the '{time_filter}' timeframe to run advanced analytics.")
