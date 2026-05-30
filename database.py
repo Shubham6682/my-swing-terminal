@@ -69,7 +69,8 @@ def save_portfolio_cloud(data):
                 df = df.fillna("") 
                 write_data = [df.columns.values.tolist()] + df.values.tolist()
             else:
-                write_data = [["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "StopPrice", "Strategy", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Trap_Score", "Momentum_Velocity", "AI_Confidence"]]
+                # 🟢 THE FIX: Added "Max_Profit_%" and "Max_Drawdown_%" to the end of this list
+                write_data = [["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "StopPrice", "Strategy", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Trap_Score", "Momentum_Velocity", "AI_Confidence", "Max_Profit_%", "Max_Drawdown_%"]]
             sheet.clear()
             sheet.update(write_data)
     except Exception as e: print(f"Cloud Save Error: {e}")
