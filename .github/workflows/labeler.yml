@@ -24,9 +24,10 @@ jobs:
           pip install pandas yfinance gspread oauth2client pytz streamlit toml
 
       - name: Build Secrets File
+        env:
+          SECRET_DATA: ${{ secrets.GCP_SECRETS_TOML }}
         run: |
           mkdir -p .streamlit
-          echo "${{ secrets.GCP_SECRETS_TOML }}" > .streamlit/secrets.toml
-
+          echo "$SECRET_DATA" > .streamlit/secrets.toml
       - name: Run Script
         run: python auto_ghost_labeler.py
