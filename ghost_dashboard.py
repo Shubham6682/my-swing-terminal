@@ -41,7 +41,7 @@ def render_ghost_portfolio():
     
     with st.spinner(f"Syncing live market data for {len(unique_tickers)} vetoed stocks..."):
         try:
-            live_data = yf.download(unique_tickers, period="1mo", progress=False)['Close']
+            live_data = yf.download(unique_tickers, period="1y", progress=False)['Close']
         except Exception as e:
             st.error(f"Market Data Error: {e}")
             live_data = pd.DataFrame()
