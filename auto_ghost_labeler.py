@@ -55,7 +55,15 @@ def run_automated_labeling():
             stock_data = yf.download(ticker, start=veto_date.strftime("%Y-%m-%d"), progress=False)
             if stock_data.empty or 'Close' not in stock_data.columns: continue
                 
-            post_veto_data = stock_data[stock_data.index.tz_localize(None) >= veto_date]
+            # THE BOUNDARY FIX: Calculate the exact expiration date (T+8)
+            expiration_date = veto_date + datetime.timedelta(days=MAX_DAYS)
+            
+            # THE BOUNDARY FIX: Slice data to STRICTLY exist within the 8-day window
+            post_veto_data = stock_data[
+                (stock_data.index.tz_localize(None) >= veto_date) & 
+                (stock_data.index.tz_localize(None) <= expiration_date)
+            ]
+            
             if post_veto_data.empty: continue
 
             # 🟢 START MFE/MAE INJECTION
@@ -98,9 +106,12 @@ def run_automated_labeling():
                         truth_label = "1 (Winner)"
                         trade_active = False
 
-            # Time-Decay: If T+8 expires without hitting targets, it's a safe veto (Loser)
-            if trade_active and (now - veto_date).days >= MAX_DAYS:
-                truth_label = "0 (Loser)" 
+            # Time-Decay Check: Did the simulation window actually close?
+            if trade_active:
+                if (now - veto_date).days >= MAX_DAYS:
+                    truth_label = "0 (Loser)"  # Window closed, stock chopped. Mark Loser.
+                else:
+                    truth_label = "⏳ TBD"      # Real life time hasn't reached Day 8 yet. 
             
             # Apply update if the label changed from TBD
             if truth_label != "⏳ TBD":
