@@ -572,7 +572,7 @@ with tab2:
                 closed_trade.update({
                     'ExitPrice': price, 'ExitDate': now.strftime("%Y-%m-%d"), 
                     'ExitTime': now.strftime("%H:%M:%S"), 'PnL': pnl, 
-                    'Result': "1 (Winner)" if pnl > 0 else "0 (Loser)",
+                    'Target_Label': "1 (Winner)" if pnl > 0 else "0 (Loser)", # <--- UNIFIED HERE
                     'Max_Profit_%': trade.get('Max_Profit_%', 0.0),
                     'Max_Drawdown_%': trade.get('Max_Drawdown_%', 0.0)
                 })
@@ -597,7 +597,7 @@ with tab2:
                     closed_trade.update({
                         'ExitPrice': price, 'ExitDate': now.strftime("%Y-%m-%d"), 
                         'ExitTime': now.strftime("%H:%M:%S"), 'PnL': pnl, 
-                        'Result': "MANUAL_WIN" if pnl > 0 else "MANUAL_LOSS",
+                        'Target_Label': "MANUAL_WIN" if pnl > 0 else "MANUAL_LOSS", # <--- UNIFIED HERE
                         'Max_Profit_%': trade.get('Max_Profit_%', 0.0),
                         'Max_Drawdown_%': trade.get('Max_Drawdown_%', 0.0)
                     })
