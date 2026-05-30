@@ -4,8 +4,8 @@ import yfinance as yf
 import datetime
 import pytz
 
-# Added the new sync function to the imports
-from database import fetch_sheet_data, sync_ghost_labels_to_cloud
+# Added the new sync function to the imports (modified for read-only)
+from database import fetch_sheet_data
 
 def render_ghost_portfolio():
     ist = pytz.timezone('Asia/Kolkata')
@@ -180,25 +180,11 @@ def render_ghost_portfolio():
         if not completed_trades.empty:
             st.divider()
             st.markdown("### 💾 V3 Training Pipeline")
-            st.caption(f"✅ The AI has {len(completed_trades)} definitive labels ready for V3 training.")
+            st.caption(f"✅ The AI has {len(completed_trades)} definitive labels ready for V3 training. (Cloud Sync managed by GitHub Actions)")
             
-            df_original = pd.DataFrame(raw_veto_data).copy()
-            label_mapping = dict(zip(df_results['Symbol'] + df_results['Date Vetoed'], df_results['Target_Label']))
-            
-            raw_dates = pd.to_datetime(df_original['Date']).dt.strftime("%Y-%m-%d")
-            df_original['Target_Label'] = (df_original['Symbol'] + raw_dates).map(label_mapping)
-            df_original['Target_Label'] = df_original['Target_Label'].fillna("⏳ TBD")
-            
-            c1, c2 = st.columns([1, 3])
-            if c1.button("🔄 Sync Labels to Cloud DB", use_container_width=True):
-                with st.spinner("Writing truth labels back to Google Sheets..."):
-                    if sync_ghost_labels_to_cloud(df_original):
-                        st.success("✅ Training data permanently locked in the Cloud!")
-                    else:
-                        st.error("❌ Failed to sync to Google Sheets.")
-                        
+            # Safe, read-only CSV download
             csv = completed_trades.to_csv(index=False).encode('utf-8')
-            c2.download_button(
+            st.download_button(
                 label="⬇️ Download Backup CSV",
                 data=csv,
                 file_name=f"ai_v3_training_data_{now.strftime('%Y%m%d')}.csv",
