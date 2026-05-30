@@ -125,14 +125,15 @@ def run_automated_labeling():
             print(f"   ❌ Error evaluating {sym}: {e}")
 
     # 4. Push updates to Cloud ONLY if changes were made
-    if labels_updated > 0:
-        print(f"\n🚀 Step 3: Pushing {labels_updated} finalized labels to Google Sheets...")
+    # 🟢 UPGRADED: Force sync if any pending trades exist so rolling extremes update live
+    if labels_updated > 0 or not df_pending.empty:
+        print(f"\n🚀 Step 3: Pushing updated matrix to Google Sheets...")
         if sync_ghost_labels_to_cloud(df):
-            print("✅ SUCCESS! Cloud database updated.")
+            print("✅ SUCCESS! Cloud database updated with latest rolling metrics.")
         else:
             print("❌ FAILED to write to Google Sheets.")
     else:
-        print("⏳ All pending setups are still chopping. No cloud updates required.")
+        print("⏳ Vault is entirely clean. No cloud updates required.")
 
 if __name__ == "__main__":
     run_automated_labeling()
