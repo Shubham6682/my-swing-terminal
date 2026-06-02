@@ -79,30 +79,35 @@ def run_automated_labeling():
                 print(f"   ⚠️ Could not calculate extremes for {sym}: {e}")
             # 🟢 END MFE/MAE INJECTION
 
-            # --- THE 3-5-3 TRAILING MATH ---
+            # --- THE 3-5-3 TRAILING MATH (UPGRADED: STRICT INTRADAY RISK) ---
             highest_seen = entry_price
             trade_active = True
             truth_label = "⏳ TBD"
             
-            # 🟢 FIX: Specify ['Close'] here because post_veto_data is now a full DataFrame
-            for date, price in post_veto_data['Close'].items():
+            # 🟢 UPGRADE: We iterate through the whole daily row to check Highs and Lows
+            for date, daily_data in post_veto_data.iterrows():
                 if not trade_active: break
                 
-                current_price = float(price.iloc[0]) if isinstance(price, pd.Series) else float(price)
-                if current_price > highest_seen: highest_seen = current_price
-                    
-                live_pct = ((current_price - entry_price) / entry_price) * 100
-                peak_pct = ((highest_seen - entry_price) / entry_price) * 100
+                day_high = float(daily_data['High'])
+                day_low = float(daily_data['Low'])
                 
-                # Hard Stop hit before trailing
-                if live_pct <= STOP_PCT and peak_pct < TARGET_PCT:
+                # 1. Update the highest peak seen so far (for trailing activation)
+                if day_high > highest_seen: 
+                    highest_seen = day_high
+                    
+                peak_pct = ((highest_seen - entry_price) / entry_price) * 100
+                live_low_pct = ((day_low - entry_price) / entry_price) * 100
+                
+                # 2. Strict Hard Stop: Did the intraday LOW crash through the -3% floor?
+                if live_low_pct <= STOP_PCT and peak_pct < TARGET_PCT:
                     truth_label = "0 (Loser)"
                     trade_active = False
                     
-                # Trailing Stop Activation (+5%)
+                # 3. Trailing Stop Activation (+5% Target Hit)
                 elif peak_pct >= TARGET_PCT:
                     trailing_sl_price = highest_seen * (1 - (abs(STOP_PCT)/100))
-                    if current_price <= trailing_sl_price:
+                    # If the stock hits the target, but the intraday low drops below the trail, we exit.
+                    if day_low <= trailing_sl_price:
                         truth_label = "1 (Winner)"
                         trade_active = False
 
