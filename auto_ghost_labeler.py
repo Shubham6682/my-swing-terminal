@@ -64,8 +64,12 @@ def run_automated_labeling():
                 (stock_data.index.tz_localize(None) <= expiration_date)
             ]
             
+            # 🟢 DAY 0 CONTAMINATION SHIELD: 
+            # Strip out the exact veto date from the OHLC evaluation loop. 
+            # The stock's future simulation must strictly begin on T+1.
+            post_veto_data = post_veto_data[post_veto_data.index.tz_localize(None).normalize() > veto_date.normalize()]
+            
             if post_veto_data.empty: continue
-
             # 🟢 START MFE/MAE INJECTION
             try:
                 # Calculate absolute extremes across the simulation window
