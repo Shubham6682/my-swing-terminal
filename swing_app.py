@@ -13,6 +13,7 @@ from ghost_dashboard import render_ghost_portfolio  # 🟢 ADD THIS LINE
 from ai_core import load_ai_brain, ask_ai_gatekeeper
 from indicators import calculate_rsi, calculate_bollinger_width
 from database import init_google_sheet, fetch_sheet_data, save_portfolio_cloud, log_trade_journal, log_ai_veto, log_signal_cloud, load_signals_from_cloud, sync_ghost_labels_to_cloud
+from agent_interceptor import evaluate_and_log_shadow_trade
 
 # --- 1. SYSTEM CONFIGURATION (MUST BE FIRST) ---
 st.set_page_config(page_title="Elite Quant Terminal", layout="wide")
@@ -400,9 +401,13 @@ with tab1:
                 })
                 
                 is_afternoon = now.time() >= datetime.time(13, 30)
-                if bot_active and is_afternoon and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
+                
+                # 🟢 REFACTORED CONDITION: We now let ALL raw technical triggers through so the Agent can evaluate Phantom Trades.
+                if bot_active and is_afternoon and raw_technical_trigger:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
                     if symbol not in current_holdings and symbol not in st.session_state.blacklist:
+                        
+                        # 1. Calculate the AI variables (Runs for all valid setups, regardless of Nifty health)
                         c_trap_score = round((c_rvol * c_wick_reject) / (1 + abs(c_sma20_dist)), 2)
                         c_mom_vel = round(c_rsi * c_rvol, 2)
 
@@ -413,45 +418,61 @@ with tab1:
                         }
                         macro_data_for_ai = {'VIX': c_vix, 'Nifty_Trend': n_trend}
 
+                        # 2. Get the V2 Confidence Score (The Champion's Math)
                         is_approved, ai_confidence = ask_ai_gatekeeper(ai_model, stock_data_for_ai, macro_data_for_ai)
                         ai_confidence = round(float(ai_confidence), 2)
 
-                        if is_approved:
-                            new_trade = {
-                                "Date": now.strftime("%Y-%m-%d"), "EntryTime": now.strftime("%H:%M:%S"),
-                                "Symbol": symbol, "Ticker": ticker, "Qty": 1, "BuyPrice": curr_price,
-                                "StopPrice": curr_price * (1 - (risk_per_trade/100)), "Strategy": mode,
-                                "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
-                                "RSI": c_rsi, "SMA200_Dist": c_dist,
-                                "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
-                                "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel, "AI_Confidence": ai_confidence,
-                                "Max_Profit_%": 0.0, "Max_Drawdown_%": 0.0
-                            }
-                            st.session_state.portfolio.append(new_trade)
-                            new_trades_added = True
-                            st.session_state.notifications.append(f"🟢 {now.strftime('%H:%M')} - AI APPROVED ({ai_confidence}%): {symbol} at ₹{curr_price:.2f}")
-                            st.toast(f"🤖 AI Bought: {symbol}")
-                        else:
-                            # 🟢 VULNERABILITY 2: Check memory before logging
-                            if symbol not in st.session_state.vetoed_today:
-                                # 1. Send the notification to your dashboard
-                                st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - AI VETOED ({ai_confidence}%): {symbol}")
-                                
-                                # 2. Package the exact mathematical setup
-                                vetoed_setup = {
-                                    "Date": now.strftime("%Y-%m-%d"), "Time": now.strftime("%H:%M:%S"),
-                                    "Symbol": symbol, "Price": curr_price, "AI_Confidence": ai_confidence,
+                        # 3. 🟢 FIRE THE AGENTIC INTERCEPTOR (The Challenger)
+                        try:
+                            evaluate_and_log_shadow_trade(
+                                ticker=symbol,
+                                traditional_score=ai_confidence,
+                                live_vix=c_vix,
+                                nifty_intraday_pct=n_trend,
+                                is_market_halted=not is_safe_to_buy, # Becomes True during a Nifty Bleed
+                                sheet_id=st.secrets["gcp_service_account"]["sheet_id"] # Using Streamlit Secrets
+                            )
+                        except Exception as e:
+                            print(f"Shadow logger bypassed for {symbol}: {e}")
+
+                        # 4. THE REAL PORTFOLIO TRADER (Only executes if Market is Safe)
+                        if status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
+                            if is_approved:
+                                new_trade = {
+                                    "Date": now.strftime("%Y-%m-%d"), "EntryTime": now.strftime("%H:%M:%S"),
+                                    "Symbol": symbol, "Ticker": ticker, "Qty": 1, "BuyPrice": curr_price,
+                                    "StopPrice": curr_price * (1 - (risk_per_trade/100)), "Strategy": mode,
                                     "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
                                     "RSI": c_rsi, "SMA200_Dist": c_dist,
                                     "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
-                                    "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel
+                                    "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel, "AI_Confidence": ai_confidence,
+                                    "Max_Profit_%": 0.0, "Max_Drawdown_%": 0.0
                                 }
-                                
-                                # 3. Send it to the new Google Sheet Tab for V3 training
-                                log_ai_veto(vetoed_setup)
-                                
-                                # 4. Lock the symbol in memory so it doesn't spam on the next 5-min refresh
-                                st.session_state.vetoed_today.append(symbol)
+                                st.session_state.portfolio.append(new_trade)
+                                new_trades_added = True
+                                st.session_state.notifications.append(f"🟢 {now.strftime('%H:%M')} - AI APPROVED ({ai_confidence}%): {symbol} at ₹{curr_price:.2f}")
+                                st.toast(f"🤖 AI Bought: {symbol}")
+                            else:
+                                # 🟢 VULNERABILITY 2: Check memory before logging
+                                if symbol not in st.session_state.vetoed_today:
+                                    # 1. Send the notification to your dashboard
+                                    st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - AI VETOED ({ai_confidence}%): {symbol}")
+                                    
+                                    # 2. Package the exact mathematical setup
+                                    vetoed_setup = {
+                                        "Date": now.strftime("%Y-%m-%d"), "Time": now.strftime("%H:%M:%S"),
+                                        "Symbol": symbol, "Price": curr_price, "AI_Confidence": ai_confidence,
+                                        "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
+                                        "RSI": c_rsi, "SMA200_Dist": c_dist,
+                                        "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
+                                        "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel
+                                    }
+                                    
+                                    # 3. Send it to the new Google Sheet Tab for V3 training
+                                    log_ai_veto(vetoed_setup)
+                                    
+                                    # 4. Lock the symbol in memory so it doesn't spam on the next 5-min refresh
+                                    st.session_state.vetoed_today.append(symbol)
             except: continue
 
         if scan_results:
