@@ -1,0 +1,14 @@
+{
+  "system_status": "active",
+  "last_updated": "2026-06-12",
+  "macro_boundaries": {
+    "max_allowable_vix": 18.0,
+    "nifty_bleed_threshold_percent": -1.0,
+    "phantom_trade_exploration_enabled": true
+  },
+  "override_logic": {
+    "reject_if_vix_above_max": true,
+    "halt_live_buying_on_nifty_bleed": true,
+    "min_traditional_score_for_phantom_buy": 75.0
+  }
+}
