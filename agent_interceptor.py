@@ -1,6 +1,7 @@
 import json
 import datetime
 import gspread
+import streamlit as st
 from oauth2client.service_account import ServiceAccountCredentials
 
 def load_agent_rules(filepath="agent_rules.json"):
@@ -9,10 +10,19 @@ def load_agent_rules(filepath="agent_rules.json"):
         return json.load(file)
 
 def connect_to_shadow_log(sheet_id):
-    """Establishes connection specifically to the Agentic_Shadow_Log tab."""
+    """
+    Establishes connection to the Agentic_Shadow_Log tab
+    using Streamlit's secure cloud secrets instead of a local file.
+    """
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+    
+    # Convert Streamlit's secrets format back into a dictionary for gspread
+    credentials_dict = dict(st.secrets["gcp_service_account"])
+    
+    # Authenticate using the dictionary instead of a file name
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
     client = gspread.authorize(creds)
+    
     # Open the workbook and target the specific Shadow Log tab
     return client.open_by_key(sheet_id).worksheet("Agentic_Shadow_Log")
 
