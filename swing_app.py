@@ -13,7 +13,7 @@ from ghost_dashboard import render_ghost_portfolio  # 🟢 ADD THIS LINE
 from ai_core import load_ai_brain, ask_ai_gatekeeper
 from indicators import calculate_rsi, calculate_bollinger_width
 from database import init_google_sheet, fetch_sheet_data, save_portfolio_cloud, log_trade_journal, log_ai_veto, log_signal_cloud, load_signals_from_cloud, sync_ghost_labels_to_cloud
-from agent_interceptor import evaluate_and_log_shadow_trade
+from agent_interceptor import evaluate_and_log_shadow_trade, auto_grade_shadow_log
 
 # --- 1. SYSTEM CONFIGURATION (MUST BE FIRST) ---
 st.set_page_config(page_title="Elite Quant Terminal", layout="wide")
@@ -49,6 +49,13 @@ if 'last_run_date' not in st.session_state or st.session_state.last_run_date != 
     st.session_state.blacklist = []
     st.session_state.notifications = []
     st.session_state.vetoed_today = [] # 🟢 VULNERABILITY 2: Wipe memory at midnight
+    
+    # 🟢 NEW: RUN THE AUTONOMOUS GRADER EVERY MORNING
+    if st.session_state.db_connected:
+        try:
+            auto_grade_shadow_log(st.secrets["gcp_service_account"]["sheet_id"])
+        except Exception as e:
+            pass
 
 # --- 4. SIDEBAR & NOTIFICATIONS ---
 with st.sidebar:
@@ -426,6 +433,7 @@ with tab1:
                         try:
                             evaluate_and_log_shadow_trade(
                                 ticker=symbol,
+                                entry_price=curr_price,
                                 traditional_score=ai_confidence,
                                 live_vix=c_vix,
                                 nifty_intraday_pct=n_trend,
