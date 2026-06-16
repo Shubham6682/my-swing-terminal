@@ -41,6 +41,7 @@ if 'journal' not in st.session_state: st.session_state.journal = fetch_sheet_dat
 if 'blacklist' not in st.session_state: st.session_state.blacklist = []
 if 'notifications' not in st.session_state: st.session_state.notifications = []
 if 'vetoed_today' not in st.session_state: st.session_state.vetoed_today = [] # 🟢 VULNERABILITY 2: Memory Bank added
+if 'shadow_logged_today' not in st.session_state: st.session_state.shadow_logged_today = []
 
 # Reset everything if it is a new day
 if 'last_run_date' not in st.session_state or st.session_state.last_run_date != today_str:
@@ -49,6 +50,7 @@ if 'last_run_date' not in st.session_state or st.session_state.last_run_date != 
     st.session_state.blacklist = []
     st.session_state.notifications = []
     st.session_state.vetoed_today = [] # 🟢 VULNERABILITY 2: Wipe memory at midnight
+    st.session_state.shadow_logged_today = []
     
     # 🟢 NEW: RUN THE AUTONOMOUS GRADER EVERY MORNING
     if st.session_state.db_connected:
@@ -430,19 +432,21 @@ with tab1:
                         ai_confidence = round(float(ai_confidence), 2)
 
                         # 3. 🟢 FIRE THE AGENTIC INTERCEPTOR (The Challenger)
-                        try:
-                            evaluate_and_log_shadow_trade(
-                                ticker=symbol,
-                                entry_price=curr_price,
-                                traditional_score=ai_confidence,
-                                live_vix=c_vix,
-                                nifty_intraday_pct=n_trend,
-                                is_market_halted=not is_safe_to_buy, # Becomes True during a Nifty Bleed
-                                sheet_id=st.secrets["gcp_service_account"]["sheet_id"] # Using Streamlit Secrets
-                            )
-                        except Exception as e:
-                            print(f"Shadow logger bypassed for {symbol}: {e}")
-
+                        if symbol not in st.session_state.shadow_logged_today:
+                            try:
+                                evaluate_and_log_shadow_trade(
+                                    ticker=symbol,
+                                    entry_price=curr_price,
+                                    traditional_score=ai_confidence,
+                                    live_vix=c_vix,
+                                    nifty_intraday_pct=n_trend,
+                                    is_market_halted=not is_safe_to_buy, 
+                                    sheet_id=st.secrets["gcp_service_account"]["sheet_id"] 
+                                )
+                                # 🟢 Lock the symbol in memory so it doesn't log again today
+                                st.session_state.shadow_logged_today.append(symbol)
+                            except Exception as e:
+                                print(f"Shadow logger bypassed for {symbol}: {e}")
                         # 4. THE REAL PORTFOLIO TRADER (Only executes if Market is Safe)
                         if status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
                             if is_approved:
