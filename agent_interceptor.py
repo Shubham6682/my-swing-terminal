@@ -83,8 +83,9 @@ def auto_grade_shadow_log(sheet_id):
                 
                 days_passed = (today - entry_date).days
                 
-                # Download history from entry date to today
-                df = yf.download(ticker, start=entry_date_str, threads=False, progress=False)
+                # Ensure the ticker has the .NS suffix for Yahoo Finance India
+                yf_ticker = f"{ticker}.NS" if not str(ticker).endswith(".NS") else ticker
+                df = yf.download(yf_ticker, start=entry_date_str, threads=False, progress=False)
                 if df.empty: continue
                 
                 max_high = float(df['High'].max())
