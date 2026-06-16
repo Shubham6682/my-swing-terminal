@@ -3,6 +3,7 @@ import datetime
 import gspread
 import streamlit as st
 import yfinance as yf
+import pytz
 from oauth2client.service_account import ServiceAccountCredentials
 
 def load_agent_rules(filepath="agent_rules.json"):
@@ -15,6 +16,20 @@ def connect_to_shadow_log(sheet_id):
     creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
     client = gspread.authorize(creds)
     return client.open_by_key(sheet_id).worksheet("Agentic_Shadow_Log")
+
+def fetch_todays_shadow_log(sheet_id):
+    """Reads the Google Sheet to restore the engine's memory of what it already logged today."""
+    try:
+        worksheet = connect_to_shadow_log(sheet_id)
+        data = worksheet.get_all_records()
+        ist = pytz.timezone('Asia/Kolkata')
+        today_str = datetime.datetime.now(ist).strftime("%Y-%m-%d")
+        
+        # Pulls the tickers from the sheet if the timestamp matches today's date
+        return [row['Ticker'] for row in data if str(row.get('Date_Time', '')).startswith(today_str)]
+    except Exception as e:
+        print(f"[AGENT MEMORY ERROR] Failed to fetch memory: {e}")
+        return []
 
 def evaluate_and_log_shadow_trade(ticker, entry_price, traditional_score, live_vix, nifty_intraday_pct, is_market_halted, sheet_id):
     rules = load_agent_rules()
@@ -41,7 +56,8 @@ def evaluate_and_log_shadow_trade(ticker, entry_price, traditional_score, live_v
             else:
                 agent_decision, agent_thesis = "REJECT", "Rejected: Weak mathematical setup."
 
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ist = pytz.timezone('Asia/Kolkata')
+    timestamp = datetime.datetime.now(ist).strftime("%Y-%m-%d %H:%M:%S")
     row_data = [
         timestamp, ticker, traditional_score, live_vix, nifty_intraday_pct, 
         str(is_phantom), agent_decision, agent_thesis, entry_price, "⏳ TBD"
@@ -70,7 +86,8 @@ def auto_grade_shadow_log(sheet_id):
         outcome_col_index = headers.index("T8_Final_Outcome") + 1
         
         updates = []
-        today = datetime.datetime.now().date()
+        ist = pytz.timezone('Asia/Kolkata')
+        today = datetime.datetime.now(ist).date()
         
         for index, row in enumerate(data):
             if row.get('T8_Final_Outcome') == "⏳ TBD":
