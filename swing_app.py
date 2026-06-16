@@ -13,7 +13,7 @@ from ghost_dashboard import render_ghost_portfolio  # 🟢 ADD THIS LINE
 from ai_core import load_ai_brain, ask_ai_gatekeeper
 from indicators import calculate_rsi, calculate_bollinger_width
 from database import init_google_sheet, fetch_sheet_data, save_portfolio_cloud, log_trade_journal, log_ai_veto, log_signal_cloud, load_signals_from_cloud, sync_ghost_labels_to_cloud
-from agent_interceptor import evaluate_and_log_shadow_trade, auto_grade_shadow_log
+from agent_interceptor import evaluate_and_log_shadow_trade, auto_grade_shadow_log, fetch_todays_shadow_log
 
 # --- 1. SYSTEM CONFIGURATION (MUST BE FIRST) ---
 st.set_page_config(page_title="Elite Quant Terminal", layout="wide")
@@ -49,15 +49,20 @@ if 'last_run_date' not in st.session_state or st.session_state.last_run_date != 
     st.session_state.signal_history = load_signals_from_cloud()
     st.session_state.blacklist = []
     st.session_state.notifications = []
-    st.session_state.vetoed_today = [] # 🟢 VULNERABILITY 2: Wipe memory at midnight
-    st.session_state.shadow_logged_today = []
+    st.session_state.vetoed_today = [] 
     
-    # 🟢 NEW: RUN THE AUTONOMOUS GRADER EVERY MORNING
+    # 🟢 SEED THE MEMORY BANK FROM GOOGLE SHEETS
     if st.session_state.db_connected:
         try:
-            auto_grade_shadow_log(st.secrets["gcp_service_account"]["sheet_id"])
+            sheet_id = st.secrets["gcp_service_account"]["sheet_id"]
+            # 1. Fetch memory of what was already logged today
+            st.session_state.shadow_logged_today = fetch_todays_shadow_log(sheet_id)
+            # 2. Run the morning grader
+            auto_grade_shadow_log(sheet_id)
         except Exception as e:
-            pass
+            st.session_state.shadow_logged_today = []
+    else:
+        st.session_state.shadow_logged_today = []
 
 # --- 4. SIDEBAR & NOTIFICATIONS ---
 with st.sidebar:
