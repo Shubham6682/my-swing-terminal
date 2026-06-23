@@ -14,6 +14,7 @@ from ai_core import load_ai_brain, ask_ai_gatekeeper
 from indicators import calculate_rsi, calculate_bollinger_width
 from database import init_google_sheet, fetch_sheet_data, save_portfolio_cloud, log_trade_journal, log_ai_veto, log_signal_cloud, load_signals_from_cloud, sync_ghost_labels_to_cloud
 from agent_interceptor import evaluate_and_log_shadow_trade, auto_grade_shadow_log, fetch_todays_shadow_log
+from vision_analyzer import evaluate_and_log_vision_trade
 
 # --- 1. SYSTEM CONFIGURATION (MUST BE FIRST) ---
 st.set_page_config(page_title="Elite Quant Terminal", layout="wide")
@@ -438,6 +439,7 @@ with tab1:
 
                         # 3. 🟢 FIRE THE AGENTIC INTERCEPTOR (The Challenger)
                         if symbol not in st.session_state.shadow_logged_today:
+                            # --- 🧠 BRAIN 2: THE MACRO ECONOMIST ---
                             try:
                                 evaluate_and_log_shadow_trade(
                                     ticker=symbol,
@@ -448,10 +450,21 @@ with tab1:
                                     is_market_halted=not is_safe_to_buy, 
                                     sheet_id=st.secrets["gcp_service_account"]["sheet_id"] 
                                 )
-                                # 🟢 Lock the symbol in memory so it doesn't log again today
-                                st.session_state.shadow_logged_today.append(symbol)
                             except Exception as e:
                                 print(f"Shadow logger bypassed for {symbol}: {e}")
+
+                            # --- 👁️ BRAIN 3: THE CHART ARCHITECT (NEW) ---
+                            try:
+                                ns_ticker = f"{symbol}.NS" if not str(symbol).endswith(".NS") else symbol
+                                ticker_df = yf.download(ns_ticker, period="6m", progress=False, threads=False)
+                                if not ticker_df.empty:
+                                    evaluate_and_log_vision_trade(symbol, ticker_df)
+                            except Exception as e:
+                                print(f"Vision shadow logger bypassed for {symbol}: {e}")
+
+                            # 🟢 Lock the symbol in memory so NEITHER AI logs it again today
+                            st.session_state.shadow_logged_today.append(symbol)
+
                         # 4. THE REAL PORTFOLIO TRADER (Only executes if Market is Safe)
                         if status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
                             if is_approved:
