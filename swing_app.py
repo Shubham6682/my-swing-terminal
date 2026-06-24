@@ -461,6 +461,7 @@ with tab1:
                                     evaluate_and_log_vision_trade(symbol, ticker_df)
                             except Exception as e:
                                 print(f"Vision shadow logger bypassed for {symbol}: {e}")
+                                st.error(f"🚨 VISION AI CRASHED ON {symbol}: {str(e)}") # 🟢 ADDED THIS LINE
 
                             # 🟢 Lock the symbol in memory so NEITHER AI logs it again today
                             st.session_state.shadow_logged_today.append(symbol)
