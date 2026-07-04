@@ -43,6 +43,7 @@ if 'blacklist' not in st.session_state: st.session_state.blacklist = []
 if 'notifications' not in st.session_state: st.session_state.notifications = []
 if 'vetoed_today' not in st.session_state: st.session_state.vetoed_today = [] # 🟢 VULNERABILITY 2: Memory Bank added
 if 'shadow_logged_today' not in st.session_state: st.session_state.shadow_logged_today = []
+if 'vision_logged_today' not in st.session_state: st.session_state.vision_logged_today = [] # 🟢 NEW VISION MEMORY
 
 # Reset everything if it is a new day
 if 'last_run_date' not in st.session_state or st.session_state.last_run_date != today_str:
@@ -50,7 +51,8 @@ if 'last_run_date' not in st.session_state or st.session_state.last_run_date != 
     st.session_state.signal_history = load_signals_from_cloud()
     st.session_state.blacklist = []
     st.session_state.notifications = []
-    st.session_state.vetoed_today = [] 
+    st.session_state.vetoed_today = []
+    st.session_state.vision_logged_today = [] # 🟢 NEW VISION RESET
     
     # 🟢 SEED THE MEMORY BANK FROM GOOGLE SHEETS
     if st.session_state.db_connected:
@@ -450,21 +452,23 @@ with tab1:
                                     is_market_halted=not is_safe_to_buy, 
                                     sheet_id=st.secrets["gcp_service_account"]["sheet_id"] 
                                 )
+                                # Lock ONLY the Agentic AI
+                                st.session_state.shadow_logged_today.append(symbol)
                             except Exception as e:
                                 print(f"Shadow logger bypassed for {symbol}: {e}")
 
-                            # --- 👁️ BRAIN 3: THE CHART ARCHITECT (NEW) ---
+                        # 4. 👁️ FIRE THE VISIONARY AI (The Chart Architect)
+                        if symbol not in st.session_state.vision_logged_today:
                             try:
                                 ns_ticker = f"{symbol}.NS" if not str(symbol).endswith(".NS") else symbol
                                 ticker_df = yf.download(ns_ticker, period="6m", progress=False, threads=False)
                                 if not ticker_df.empty:
                                     evaluate_and_log_vision_trade(symbol, ticker_df)
+                                    # Lock ONLY the Vision AI
+                                    st.session_state.vision_logged_today.append(symbol)
                             except Exception as e:
                                 print(f"Vision shadow logger bypassed for {symbol}: {e}")
-                                st.error(f"🚨 VISION AI CRASHED ON {symbol}: {str(e)}") # 🟢 ADDED THIS LINE
-
-                            # 🟢 Lock the symbol in memory so NEITHER AI logs it again today
-                            st.session_state.shadow_logged_today.append(symbol)
+                                st.error(f"🚨 VISION AI CRASHED ON {symbol}: {str(e)}")
 
                         # 4. THE REAL PORTFOLIO TRADER (Only executes if Market is Safe)
                         if status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
