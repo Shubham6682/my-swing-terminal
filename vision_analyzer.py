@@ -70,32 +70,29 @@ def extract_chart_topography(df, window=5):
 
 def evaluate_and_log_vision_trade(ticker, df):
     """Calculates chart health metrics and pushes them cleanly to the cloud sheet."""
-    try:
-        structure, overhead_pct, chaos = extract_chart_topography(df)
-        current_price = float(df['Close'].iloc[-1])
+    # Removed the internal try/except so swing_app.py can catch and display errors
+    structure, overhead_pct, chaos = extract_chart_topography(df)
+    current_price = float(df['Close'].iloc[-1])
+    
+    # Heuristic scoring engine for the initial data tracking phase
+    base_score = 50.0
+    if structure == "Higher_Lows (Bullish Base)": 
+        base_score += 20
+    if overhead_pct >= 5.0: 
+        base_score += 15
+    if chaos < 1.6: 
+        base_score += 10
         
-        # Heuristic scoring engine for the initial data tracking phase
-        base_score = 50.0
-        if structure == "Higher_Lows (Bullish Base)": 
-            base_score += 20
-        if overhead_pct >= 5.0: 
-            base_score += 15
-        if chaos < 1.6: 
-            base_score += 10
-            
-        vision_confidence = min(base_score, 99.0)
-        
-        ist = pytz.timezone('Asia/Kolkata')
-        timestamp = datetime.datetime.now(ist).strftime("%Y-%m-%d %H:%M:%S")
-        
-        row_data = [
-            timestamp, ticker, current_price, structure, 
-            overhead_pct, chaos, vision_confidence, "⏳ TBD"
-        ]
-        
-        worksheet = connect_to_vision_log()
-        worksheet.append_row(row_data)
-        print(f"[VISION LAB SUCCESS] Chart metrics archived for {ticker}")
-        
-    except Exception as e:
-        print(f"[VISION ERROR] Logging failed for {ticker}: {e}")
+    vision_confidence = min(base_score, 99.0)
+    
+    ist = pytz.timezone('Asia/Kolkata')
+    timestamp = datetime.datetime.now(ist).strftime("%Y-%m-%d %H:%M:%S")
+    
+    row_data = [
+        timestamp, ticker, current_price, structure, 
+        overhead_pct, chaos, vision_confidence, "⏳ TBD"
+    ]
+    
+    worksheet = connect_to_vision_log()
+    worksheet.append_row(row_data)
+    print(f"[VISION LAB SUCCESS] Chart metrics archived for {ticker}")
