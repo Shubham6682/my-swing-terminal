@@ -460,8 +460,12 @@ with tab1:
                         # 4. 👁️ FIRE THE VISIONARY AI (The Chart Architect)
                         if symbol not in st.session_state.vision_logged_today:
                             try:
-                                ns_ticker = f"{symbol}.NS" if not str(symbol).endswith(".NS") else symbol
-                                ticker_df = yf.download(ns_ticker, period="6m", progress=False, threads=False)
+                                # 🟢 THE FIX: Zero API Calls. Build the 6-month chart using data already in memory!
+                                ticker_df = pd.DataFrame({
+                                    'Close': closes[ticker],
+                                    'High': highs[ticker]
+                                }).dropna().tail(125) # 125 trading days = ~6 months
+                                
                                 if not ticker_df.empty:
                                     evaluate_and_log_vision_trade(symbol, ticker_df)
                                     # Lock ONLY the Vision AI
