@@ -78,13 +78,17 @@ def auto_grade_shadow_log(sheet_id):
     and stamps 1 (Win) or 0 (Loss) based on your strict 3-5-3 rules inside a T+8 window.
     """
     import pandas as pd
+    import streamlit as st
     try:
         worksheet = connect_to_shadow_log(sheet_id)
         data = worksheet.get_all_records()
         headers = worksheet.row_values(1)
         
+        # Clean headers of accidental spaces
+        headers = [str(h).strip() for h in headers]
+        
         if "T8_Final_Outcome" not in headers or "Entry_Price" not in headers: 
-            print("[AGENT AUDIT ERROR] Missing 'T8_Final_Outcome' or 'Entry_Price' columns.")
+            st.error("🚨 AGENT AUDIT ERROR: Missing 'T8_Final_Outcome' or 'Entry_Price' columns.")
             return
             
         outcome_col_index = headers.index("T8_Final_Outcome") + 1
@@ -93,33 +97,49 @@ def auto_grade_shadow_log(sheet_id):
         today = datetime.datetime.now(ist).date()
         updates = []
         
-        # 1. Collect all pending tickers for a SINGLE bulk download (Bypasses API Ban)
         pending_rows = []
         unique_tickers = set()
         
         for index, row in enumerate(data):
-            if row.get('T8_Final_Outcome') in ["⏳ TBD", ""]:
-                entry_price = float(row.get('Entry_Price', 0))
+            # 🟢 FIX 1: Broad TBD detection (handles both "TBD" and "⏳ TBD")
+            current_outcome = str(row.get('T8_Final_Outcome', '')).strip()
+            if "TBD" in current_outcome or current_outcome == "":
+                
+                # 🟢 FIX 2: Safely parse numbers (handles commas and currency symbols)
+                raw_price = str(row.get('Entry_Price', '0')).replace(',', '').replace('₹', '').strip()
+                try:
+                    entry_price = float(raw_price)
+                except ValueError:
+                    continue 
+                    
                 if entry_price == 0: continue
                 
-                ticker = row['Ticker']
-                yf_ticker = f"{ticker}.NS" if not str(ticker).endswith(".NS") else ticker
+                ticker = str(row.get('Ticker', '')).strip()
+                if not ticker: continue
+                
+                yf_ticker = f"{ticker}.NS" if not ticker.endswith(".NS") else ticker
                 unique_tickers.add(yf_ticker)
                 pending_rows.append((index, row, yf_ticker, entry_price))
                 
         if not pending_rows: return
         
-        # 2. Bulk download 3 months of data (covers trades going back to May)
+        # 🟢 UI FEEDBACK: Tells you it actually found rows to grade
+        st.toast(f"🔄 Agent Audit: Analyzing {len(pending_rows)} pending trades from the cloud...", icon="⏳")
+        
         live_data = yf.download(list(unique_tickers), period="3mo", threads=False, progress=False)
         
         for index, row, yf_ticker, entry_price in pending_rows:
-            entry_date_str = str(row['Date_Time']).split(" ")[0]
-            entry_date = datetime.datetime.strptime(entry_date_str, "%Y-%m-%d").date()
+            # 🟢 FIX 3: Safe Date Parsing
+            raw_date = str(row.get('Date_Time', row.get('Date', ''))).split(" ")[0]
+            try:
+                entry_date = datetime.datetime.strptime(raw_date, "%Y-%m-%d").date()
+            except ValueError:
+                continue 
+                
             days_passed = (today - entry_date).days
             
-            # Safely extract single ticker data from the bulk download
             if len(unique_tickers) == 1:
-                stock_df = live_data
+                stock_df = live_data.copy()
             else:
                 if 'Close' not in live_data.columns or yf_ticker not in live_data['Close']: continue
                 stock_df = pd.DataFrame({
@@ -130,10 +150,8 @@ def auto_grade_shadow_log(sheet_id):
                 
             if stock_df.empty: continue
             
-            # 3. STRICT BOUNDARY SHIELD: Lock the evaluation to exactly T+8 Days
             expiration_date = entry_date + datetime.timedelta(days=8)
             
-            # Exclude Day 0 contamination, end exactly on Day 8
             t8_window = stock_df[(stock_df.index.tz_localize(None).date() > entry_date) & 
                                  (stock_df.index.tz_localize(None).date() <= expiration_date)]
             
@@ -145,7 +163,6 @@ def auto_grade_shadow_log(sheet_id):
             
             outcome = "⏳ TBD"
             
-            # The Autonomous Evaluator (5% Target, -3% Stop)
             if max_high >= entry_price * 1.05: outcome = "1"
             elif min_low <= entry_price * 0.97: outcome = "0"
             elif days_passed >= 8: outcome = "1" if last_close > entry_price else "0"
@@ -154,10 +171,10 @@ def auto_grade_shadow_log(sheet_id):
                 row_number = index + 2 
                 updates.append({'range': gspread.utils.rowcol_to_a1(row_number, outcome_col_index), 'values': [[outcome]]})
                 
-        # 4. Batch push all updates simultaneously
         if updates:
             worksheet.batch_update(updates)
-            print(f"[AGENT AUDIT] Automatically graded {len(updates)} shadow trades.")
+            st.success(f"🤖 AGENT AUDIT COMPLETE: Graded {len(updates)} pending shadow trades!")
             
     except Exception as e:
-        print(f"[AGENT AUDIT ERROR]: {e}")
+        # 🟢 UI FEEDBACK: If it crashes, it will blast a red error on your screen so we can see it
+        st.error(f"🚨 AGENT AUDIT CRASHED: {str(e)}")
