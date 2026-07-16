@@ -58,14 +58,20 @@ if 'last_run_date' not in st.session_state or st.session_state.last_run_date != 
     if st.session_state.db_connected:
         try:
             sheet_id = st.secrets["gcp_service_account"]["sheet_id"]
-            # 1. Fetch memory of what was already logged today
+            # 1. Fetch memory of what was already logged today (Agentic Log)
             st.session_state.shadow_logged_today = fetch_todays_shadow_log(sheet_id)
+            
+            # 🟢 FIX 2: Clone the Agentic cloud memory to the Vision AI so it survives page reloads!
+            st.session_state.vision_logged_today = list(st.session_state.shadow_logged_today)
+            
             # 2. Run the morning grader
             auto_grade_shadow_log(sheet_id)
         except Exception as e:
             st.session_state.shadow_logged_today = []
+            st.session_state.vision_logged_today = [] # 🟢 Keep synced on error
     else:
         st.session_state.shadow_logged_today = []
+        st.session_state.vision_logged_today = [] # 🟢 Keep synced offline
 
 # --- 4. SIDEBAR & NOTIFICATIONS ---
 with st.sidebar:
@@ -417,7 +423,7 @@ with tab1:
                     "Gap %": f"{gap_pct:.1f}%"
                 })
                 
-                is_afternoon = now.time() >= datetime.time(13, 30)
+                is_afternoon = datetime.time(13, 30) <= now.time() < datetime.time(15, 30)
                 
                 # 🟢 REFACTORED CONDITION: We now let ALL raw technical triggers through so the Agent can evaluate Phantom Trades.
                 if bot_active and is_afternoon and raw_technical_trigger:
