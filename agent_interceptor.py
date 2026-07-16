@@ -79,6 +79,9 @@ def auto_grade_shadow_log(sheet_id):
     """
     import pandas as pd
     import streamlit as st
+    import datetime
+    import pytz
+    
     try:
         worksheet = connect_to_shadow_log(sheet_id)
         data = worksheet.get_all_records()
@@ -99,13 +102,12 @@ def auto_grade_shadow_log(sheet_id):
         
         pending_rows = []
         unique_tickers = set()
+        skipped_dates = 0 # Track skipped rows for debugging
         
         for index, row in enumerate(data):
-            # 🟢 FIX 1: Broad TBD detection (handles both "TBD" and "⏳ TBD")
             current_outcome = str(row.get('T8_Final_Outcome', '')).strip()
             if "TBD" in current_outcome or current_outcome == "":
                 
-                # 🟢 FIX 2: Safely parse numbers (handles commas and currency symbols)
                 raw_price = str(row.get('Entry_Price', '0')).replace(',', '').replace('₹', '').strip()
                 try:
                     entry_price = float(raw_price)
@@ -123,17 +125,26 @@ def auto_grade_shadow_log(sheet_id):
                 
         if not pending_rows: return
         
-        # 🟢 UI FEEDBACK: Tells you it actually found rows to grade
         st.toast(f"🔄 Agent Audit: Analyzing {len(pending_rows)} pending trades from the cloud...", icon="⏳")
         
+        # 🟢 BULK DOWNLOAD: Grab 3 months to cover May, June, and July
         live_data = yf.download(list(unique_tickers), period="3mo", threads=False, progress=False)
         
         for index, row, yf_ticker, entry_price in pending_rows:
-            # 🟢 FIX 3: Safe Date Parsing
-            raw_date = str(row.get('Date_Time', row.get('Date', ''))).split(" ")[0]
-            try:
-                entry_date = datetime.datetime.strptime(raw_date, "%Y-%m-%d").date()
-            except ValueError:
+            # 🟢 FIX: The Multi-Format Date Parser (Handles 16-05-2026 and 2026-05-16)
+            raw_date = str(row.get('Date_Time', row.get('Date', ''))).split(" ")[0].strip()
+            entry_date = None
+            
+            for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
+                try:
+                    entry_date = datetime.datetime.strptime(raw_date, fmt).date()
+                    break # Success, break out of format loop
+                except ValueError:
+                    pass
+            
+            # If it still couldn't parse the date after trying all formats, skip it
+            if not entry_date:
+                skipped_dates += 1
                 continue 
                 
             days_passed = (today - entry_date).days
@@ -174,7 +185,8 @@ def auto_grade_shadow_log(sheet_id):
         if updates:
             worksheet.batch_update(updates)
             st.success(f"🤖 AGENT AUDIT COMPLETE: Graded {len(updates)} pending shadow trades!")
+        elif skipped_dates > 0:
+            st.warning(f"⚠️ Audit ran, but couldn't read the date format for {skipped_dates} rows.")
             
     except Exception as e:
-        # 🟢 UI FEEDBACK: If it crashes, it will blast a red error on your screen so we can see it
         st.error(f"🚨 AGENT AUDIT CRASHED: {str(e)}")
