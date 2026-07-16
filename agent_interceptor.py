@@ -81,14 +81,15 @@ def auto_grade_shadow_log(sheet_id):
     import streamlit as st
     import datetime
     import pytz
+    import gspread
     
     try:
         worksheet = connect_to_shadow_log(sheet_id)
         data = worksheet.get_all_records()
-        headers = worksheet.row_values(1)
+        raw_headers = worksheet.row_values(1)
         
         # Clean headers of accidental spaces
-        headers = [str(h).strip() for h in headers]
+        headers = [str(h).strip() for h in raw_headers]
         
         if "T8_Final_Outcome" not in headers or "Entry_Price" not in headers: 
             st.error("🚨 AGENT AUDIT ERROR: Missing 'T8_Final_Outcome' or 'Entry_Price' columns.")
@@ -102,13 +103,16 @@ def auto_grade_shadow_log(sheet_id):
         
         pending_rows = []
         unique_tickers = set()
-        skipped_dates = 0 # Track skipped rows for debugging
+        skipped_dates = 0 
         
         for index, row in enumerate(data):
-            current_outcome = str(row.get('T8_Final_Outcome', '')).strip()
+            # 🟢 FIX 1: Strip invisible spaces from the Google Sheet dictionary keys themselves!
+            clean_row = {str(k).strip(): v for k, v in row.items()}
+            
+            current_outcome = str(clean_row.get('T8_Final_Outcome', '')).strip()
             if "TBD" in current_outcome or current_outcome == "":
                 
-                raw_price = str(row.get('Entry_Price', '0')).replace(',', '').replace('₹', '').strip()
+                raw_price = str(clean_row.get('Entry_Price', '0')).replace(',', '').replace('₹', '').strip()
                 try:
                     entry_price = float(raw_price)
                 except ValueError:
@@ -116,55 +120,61 @@ def auto_grade_shadow_log(sheet_id):
                     
                 if entry_price == 0: continue
                 
-                ticker = str(row.get('Ticker', '')).strip()
+                ticker = str(clean_row.get('Ticker', '')).strip()
                 if not ticker: continue
                 
                 yf_ticker = f"{ticker}.NS" if not ticker.endswith(".NS") else ticker
                 unique_tickers.add(yf_ticker)
-                pending_rows.append((index, row, yf_ticker, entry_price))
+                pending_rows.append((index, clean_row, yf_ticker, entry_price))
                 
-        if not pending_rows: return
+        if not pending_rows: 
+            # 🟢 FIX 2: No more silent failures! The UI will tell you if it couldn't parse the rows.
+            st.info("ℹ️ Agent Audit: No pending trades found (or headers couldn't be parsed).")
+            return
         
         st.toast(f"🔄 Agent Audit: Analyzing {len(pending_rows)} pending trades from the cloud...", icon="⏳")
         
-        # 🟢 BULK DOWNLOAD: Grab 3 months to cover May, June, and July
+        # Bulk download: Grab 3 months to cover old trades
         live_data = yf.download(list(unique_tickers), period="3mo", threads=False, progress=False)
         
-        for index, row, yf_ticker, entry_price in pending_rows:
-            # 🟢 FIX: The Multi-Format Date Parser (Handles 16-05-2026 and 2026-05-16)
-            raw_date = str(row.get('Date_Time', row.get('Date', ''))).split(" ")[0].strip()
+        for index, clean_row, yf_ticker, entry_price in pending_rows:
+            raw_date = str(clean_row.get('Date_Time', clean_row.get('Date', ''))).split(" ")[0].strip()
             entry_date = None
             
             for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
                 try:
                     entry_date = datetime.datetime.strptime(raw_date, fmt).date()
-                    break # Success, break out of format loop
+                    break 
                 except ValueError:
                     pass
             
-            # If it still couldn't parse the date after trying all formats, skip it
             if not entry_date:
                 skipped_dates += 1
                 continue 
                 
             days_passed = (today - entry_date).days
             
-            if len(unique_tickers) == 1:
-                stock_df = live_data.copy()
-            else:
-                if 'Close' not in live_data.columns or yf_ticker not in live_data['Close']: continue
-                stock_df = pd.DataFrame({
-                    'High': live_data['High'][yf_ticker],
-                    'Low': live_data['Low'][yf_ticker],
-                    'Close': live_data['Close'][yf_ticker]
-                }).dropna()
+            try:
+                if len(unique_tickers) == 1:
+                    stock_df = live_data.copy()
+                else:
+                    if 'Close' not in live_data.columns or yf_ticker not in live_data['Close']: continue
+                    stock_df = pd.DataFrame({
+                        'High': live_data['High'][yf_ticker],
+                        'Low': live_data['Low'][yf_ticker],
+                        'Close': live_data['Close'][yf_ticker]
+                    }).dropna()
+            except Exception:
+                continue
                 
             if stock_df.empty: continue
             
             expiration_date = entry_date + datetime.timedelta(days=8)
             
-            t8_window = stock_df[(stock_df.index.tz_localize(None).date() > entry_date) & 
-                                 (stock_df.index.tz_localize(None).date() <= expiration_date)]
+            # 🟢 FIX 3: Universal timezone-safe date extraction (Eliminates the tz_localize crash)
+            stock_dates = pd.to_datetime(stock_df.index).date 
+            
+            t8_window = stock_df[(stock_dates > entry_date) & (stock_dates <= expiration_date)]
             
             if t8_window.empty: continue
             
@@ -187,6 +197,9 @@ def auto_grade_shadow_log(sheet_id):
             st.success(f"🤖 AGENT AUDIT COMPLETE: Graded {len(updates)} pending shadow trades!")
         elif skipped_dates > 0:
             st.warning(f"⚠️ Audit ran, but couldn't read the date format for {skipped_dates} rows.")
+        else:
+            # 🟢 FIX 4: Feedback if the math ran, but the trade hasn't expired yet
+            st.info("ℹ️ Audit ran, but the pending trades haven't hit their targets or 8-day expiration yet.")
             
     except Exception as e:
         st.error(f"🚨 AGENT AUDIT CRASHED: {str(e)}")
