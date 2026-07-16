@@ -74,54 +74,87 @@ def evaluate_and_log_shadow_trade(ticker, entry_price, traditional_score, live_v
 
 def auto_grade_shadow_log(sheet_id):
     """
-    Autonomously scans the Shadow Log for pending trades, checks market history, 
-    and stamps 1 (Win) or 0 (Loss) based on your strict 3-5-3 rules.
+    Autonomously scans the Shadow Log for pending trades, pulls bulk market history, 
+    and stamps 1 (Win) or 0 (Loss) based on your strict 3-5-3 rules inside a T+8 window.
     """
+    import pandas as pd
     try:
         worksheet = connect_to_shadow_log(sheet_id)
         data = worksheet.get_all_records()
         headers = worksheet.row_values(1)
         
-        if "T8_Final_Outcome" not in headers: return
+        if "T8_Final_Outcome" not in headers or "Entry_Price" not in headers: 
+            print("[AGENT AUDIT ERROR] Missing 'T8_Final_Outcome' or 'Entry_Price' columns.")
+            return
+            
         outcome_col_index = headers.index("T8_Final_Outcome") + 1
         
-        updates = []
         ist = pytz.timezone('Asia/Kolkata')
         today = datetime.datetime.now(ist).date()
+        updates = []
+        
+        # 1. Collect all pending tickers for a SINGLE bulk download (Bypasses API Ban)
+        pending_rows = []
+        unique_tickers = set()
         
         for index, row in enumerate(data):
-            if row.get('T8_Final_Outcome') == "⏳ TBD":
-                ticker = row['Ticker']
-                entry_date_str = str(row['Date_Time']).split(" ")[0]
-                entry_date = datetime.datetime.strptime(entry_date_str, "%Y-%m-%d").date()
+            if row.get('T8_Final_Outcome') in ["⏳ TBD", ""]:
                 entry_price = float(row.get('Entry_Price', 0))
-                
                 if entry_price == 0: continue
                 
-                days_passed = (today - entry_date).days
-                
-                # Ensure the ticker has the .NS suffix for Yahoo Finance India
+                ticker = row['Ticker']
                 yf_ticker = f"{ticker}.NS" if not str(ticker).endswith(".NS") else ticker
-                df = yf.download(yf_ticker, start=entry_date_str, threads=False, progress=False)
-                if df.empty: continue
+                unique_tickers.add(yf_ticker)
+                pending_rows.append((index, row, yf_ticker, entry_price))
                 
-                max_high = float(df['High'].max())
-                min_low = float(df['Low'].min())
-                last_close = float(df['Close'].iloc[-1])
+        if not pending_rows: return
+        
+        # 2. Bulk download 3 months of data (covers trades going back to May)
+        live_data = yf.download(list(unique_tickers), period="3mo", threads=False, progress=False)
+        
+        for index, row, yf_ticker, entry_price in pending_rows:
+            entry_date_str = str(row['Date_Time']).split(" ")[0]
+            entry_date = datetime.datetime.strptime(entry_date_str, "%Y-%m-%d").date()
+            days_passed = (today - entry_date).days
+            
+            # Safely extract single ticker data from the bulk download
+            if len(unique_tickers) == 1:
+                stock_df = live_data
+            else:
+                if 'Close' not in live_data.columns or yf_ticker not in live_data['Close']: continue
+                stock_df = pd.DataFrame({
+                    'High': live_data['High'][yf_ticker],
+                    'Low': live_data['Low'][yf_ticker],
+                    'Close': live_data['Close'][yf_ticker]
+                }).dropna()
                 
-                outcome = "⏳ TBD"
-                
-                # The Autonomous 3-5-3 Evaluator
-                if max_high >= entry_price * 1.05: outcome = "1"       # Hit 5% Target
-                elif min_low <= entry_price * 0.97: outcome = "0"      # Hit 3% Stop Loss
-                elif days_passed >= 8:                                 # Time Decay (8 Days)
-                    outcome = "1" if last_close > entry_price else "0"
-                        
-                if outcome != "⏳ TBD":
-                    row_number = index + 2 # +2 because lists are 0-indexed and Sheet row 1 is headers
-                    updates.append({'range': gspread.utils.rowcol_to_a1(row_number, outcome_col_index), 'values': [[outcome]]})
+            if stock_df.empty: continue
+            
+            # 3. STRICT BOUNDARY SHIELD: Lock the evaluation to exactly T+8 Days
+            expiration_date = entry_date + datetime.timedelta(days=8)
+            
+            # Exclude Day 0 contamination, end exactly on Day 8
+            t8_window = stock_df[(stock_df.index.tz_localize(None).date() > entry_date) & 
+                                 (stock_df.index.tz_localize(None).date() <= expiration_date)]
+            
+            if t8_window.empty: continue
+            
+            max_high = float(t8_window['High'].max())
+            min_low = float(t8_window['Low'].min())
+            last_close = float(t8_window['Close'].iloc[-1])
+            
+            outcome = "⏳ TBD"
+            
+            # The Autonomous Evaluator (5% Target, -3% Stop)
+            if max_high >= entry_price * 1.05: outcome = "1"
+            elif min_low <= entry_price * 0.97: outcome = "0"
+            elif days_passed >= 8: outcome = "1" if last_close > entry_price else "0"
                     
-        # Batch update all graded rows at once to save Google API limits
+            if outcome != "⏳ TBD":
+                row_number = index + 2 
+                updates.append({'range': gspread.utils.rowcol_to_a1(row_number, outcome_col_index), 'values': [[outcome]]})
+                
+        # 4. Batch push all updates simultaneously
         if updates:
             worksheet.batch_update(updates)
             print(f"[AGENT AUDIT] Automatically graded {len(updates)} shadow trades.")
