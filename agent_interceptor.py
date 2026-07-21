@@ -74,7 +74,7 @@ def evaluate_and_log_shadow_trade(ticker, entry_price, traditional_score, live_v
 
 def auto_grade_shadow_log(sheet_id):
     """
-    Autonomously scans the Shadow Log for pending trades, pulls bulk market history, 
+    Autonomously scans BOTH Shadow Logs (Agentic and Vision), pulls bulk market history, 
     and stamps 1 (Win) or 0 (Loss) based on your strict 3-5-3 rules inside a T+8 window.
     """
     import pandas as pd
@@ -84,122 +84,129 @@ def auto_grade_shadow_log(sheet_id):
     import gspread
     
     try:
-        worksheet = connect_to_shadow_log(sheet_id)
-        data = worksheet.get_all_records()
-        raw_headers = worksheet.row_values(1)
+        # 1. Connect using your existing function
+        base_worksheet = connect_to_shadow_log(sheet_id)
         
-        # Clean headers of accidental spaces
-        headers = [str(h).strip() for h in raw_headers]
+        # 2. 🟢 THE UPGRADE: Grab the parent spreadsheet so we can access ANY tab
+        spreadsheet = base_worksheet.spreadsheet
         
-        if "T8_Final_Outcome" not in headers or "Entry_Price" not in headers: 
-            st.error("🚨 AGENT AUDIT ERROR: Missing 'T8_Final_Outcome' or 'Entry_Price' columns.")
-            return
-            
-        outcome_col_index = headers.index("T8_Final_Outcome") + 1
+        # 3. 🟢 THE LOOP: Define the exact names of your two shadow logs
+        tabs_to_grade = ["Agentic_Shadow_Log", "Vision_Shadow_Log"]
         
-        ist = pytz.timezone('Asia/Kolkata')
-        today = datetime.datetime.now(ist).date()
-        updates = []
-        
-        pending_rows = []
-        unique_tickers = set()
-        skipped_dates = 0 
-        
-        for index, row in enumerate(data):
-            # 🟢 FIX 1: Strip invisible spaces from the Google Sheet dictionary keys themselves!
-            clean_row = {str(k).strip(): v for k, v in row.items()}
-            
-            current_outcome = str(clean_row.get('T8_Final_Outcome', '')).strip()
-            if "TBD" in current_outcome or current_outcome == "":
-                
-                raw_price = str(clean_row.get('Entry_Price', '0')).replace(',', '').replace('₹', '').strip()
-                try:
-                    entry_price = float(raw_price)
-                except ValueError:
-                    continue 
-                    
-                if entry_price == 0: continue
-                
-                ticker = str(clean_row.get('Ticker', '')).strip()
-                if not ticker: continue
-                
-                yf_ticker = f"{ticker}.NS" if not ticker.endswith(".NS") else ticker
-                unique_tickers.add(yf_ticker)
-                pending_rows.append((index, clean_row, yf_ticker, entry_price))
-                
-        if not pending_rows: 
-            # 🟢 FIX 2: No more silent failures! The UI will tell you if it couldn't parse the rows.
-            st.info("ℹ️ Agent Audit: No pending trades found (or headers couldn't be parsed).")
-            return
-        
-        st.toast(f"🔄 Agent Audit: Analyzing {len(pending_rows)} pending trades from the cloud...", icon="⏳")
-        
-        # Bulk download: Grab 3 months to cover old trades
-        live_data = yf.download(list(unique_tickers), period="3mo", threads=False, progress=False)
-        
-        for index, clean_row, yf_ticker, entry_price in pending_rows:
-            raw_date = str(clean_row.get('Date_Time', clean_row.get('Date', ''))).split(" ")[0].strip()
-            entry_date = None
-            
-            for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
-                try:
-                    entry_date = datetime.datetime.strptime(raw_date, fmt).date()
-                    break 
-                except ValueError:
-                    pass
-            
-            if not entry_date:
-                skipped_dates += 1
-                continue 
-                
-            days_passed = (today - entry_date).days
-            
+        for tab_name in tabs_to_grade:
             try:
-                if len(unique_tickers) == 1:
-                    stock_df = live_data.copy()
-                else:
-                    if 'Close' not in live_data.columns or yf_ticker not in live_data['Close']: continue
-                    stock_df = pd.DataFrame({
-                        'High': live_data['High'][yf_ticker],
-                        'Low': live_data['Low'][yf_ticker],
-                        'Close': live_data['Close'][yf_ticker]
-                    }).dropna()
-            except Exception:
+                worksheet = spreadsheet.worksheet(tab_name)
+            except gspread.exceptions.WorksheetNotFound:
+                st.error(f"🚨 Missing tab in Google Sheets: '{tab_name}'")
+                continue # Skip to the next tab if one is missing
+                
+            data = worksheet.get_all_records()
+            raw_headers = worksheet.row_values(1)
+            
+            headers = [str(h).strip() for h in raw_headers]
+            
+            if "T8_Final_Outcome" not in headers or "Entry_Price" not in headers: 
+                st.error(f"🚨 {tab_name} ERROR: Missing 'T8_Final_Outcome' or 'Entry_Price' columns.")
                 continue
                 
-            if stock_df.empty: continue
+            outcome_col_index = headers.index("T8_Final_Outcome") + 1
             
-            expiration_date = entry_date + datetime.timedelta(days=8)
+            ist = pytz.timezone('Asia/Kolkata')
+            today = datetime.datetime.now(ist).date()
+            updates = []
             
-            # 🟢 FIX 3: Universal timezone-safe date extraction (Eliminates the tz_localize crash)
-            stock_dates = pd.to_datetime(stock_df.index).date 
+            pending_rows = []
+            unique_tickers = set()
+            skipped_dates = 0 
             
-            t8_window = stock_df[(stock_dates > entry_date) & (stock_dates <= expiration_date)]
-            
-            if t8_window.empty: continue
-            
-            max_high = float(t8_window['High'].max())
-            min_low = float(t8_window['Low'].min())
-            last_close = float(t8_window['Close'].iloc[-1])
-            
-            outcome = "⏳ TBD"
-            
-            if max_high >= entry_price * 1.05: outcome = "1"
-            elif min_low <= entry_price * 0.97: outcome = "0"
-            elif days_passed >= 8: outcome = "1" if last_close > entry_price else "0"
-                    
-            if outcome != "⏳ TBD":
-                row_number = index + 2 
-                updates.append({'range': gspread.utils.rowcol_to_a1(row_number, outcome_col_index), 'values': [[outcome]]})
+            for index, row in enumerate(data):
+                clean_row = {str(k).strip(): v for k, v in row.items()}
+                current_outcome = str(clean_row.get('T8_Final_Outcome', '')).strip()
                 
-        if updates:
-            worksheet.batch_update(updates)
-            st.success(f"🤖 AGENT AUDIT COMPLETE: Graded {len(updates)} pending shadow trades!")
-        elif skipped_dates > 0:
-            st.warning(f"⚠️ Audit ran, but couldn't read the date format for {skipped_dates} rows.")
-        else:
-            # 🟢 FIX 4: Feedback if the math ran, but the trade hasn't expired yet
-            st.info("ℹ️ Audit ran, but the pending trades haven't hit their targets or 8-day expiration yet.")
+                if "TBD" in current_outcome or current_outcome == "":
+                    raw_price = str(clean_row.get('Entry_Price', '0')).replace(',', '').replace('₹', '').strip()
+                    try:
+                        entry_price = float(raw_price)
+                    except ValueError:
+                        continue 
+                        
+                    if entry_price == 0: continue
+                    
+                    ticker = str(clean_row.get('Ticker', '')).strip()
+                    if not ticker: continue
+                    
+                    yf_ticker = f"{ticker}.NS" if not ticker.endswith(".NS") else ticker
+                    unique_tickers.add(yf_ticker)
+                    pending_rows.append((index, clean_row, yf_ticker, entry_price))
+                    
+            if not pending_rows: 
+                st.info(f"ℹ️ {tab_name}: No pending trades found (or headers couldn't be parsed).")
+                continue # Skip to the next tab
             
+            st.toast(f"🔄 {tab_name}: Analyzing {len(pending_rows)} pending trades...", icon="⏳")
+            
+            live_data = yf.download(list(unique_tickers), period="3mo", threads=False, progress=False)
+            
+            for index, clean_row, yf_ticker, entry_price in pending_rows:
+                raw_date = str(clean_row.get('Date_Time', clean_row.get('Date', ''))).split(" ")[0].strip()
+                entry_date = None
+                
+                for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
+                    try:
+                        entry_date = datetime.datetime.strptime(raw_date, fmt).date()
+                        break 
+                    except ValueError:
+                        pass
+                
+                if not entry_date:
+                    skipped_dates += 1
+                    continue 
+                    
+                days_passed = (today - entry_date).days
+                
+                try:
+                    if len(unique_tickers) == 1:
+                        stock_df = live_data.copy()
+                    else:
+                        if 'Close' not in live_data.columns or yf_ticker not in live_data['Close']: continue
+                        stock_df = pd.DataFrame({
+                            'High': live_data['High'][yf_ticker],
+                            'Low': live_data['Low'][yf_ticker],
+                            'Close': live_data['Close'][yf_ticker]
+                        }).dropna()
+                except Exception:
+                    continue
+                    
+                if stock_df.empty: continue
+                
+                expiration_date = entry_date + datetime.timedelta(days=8)
+                stock_dates = pd.to_datetime(stock_df.index).date 
+                
+                t8_window = stock_df[(stock_dates > entry_date) & (stock_dates <= expiration_date)]
+                
+                if t8_window.empty: continue
+                
+                max_high = float(t8_window['High'].max())
+                min_low = float(t8_window['Low'].min())
+                last_close = float(t8_window['Close'].iloc[-1])
+                
+                outcome = "⏳ TBD"
+                
+                if max_high >= entry_price * 1.05: outcome = "1"
+                elif min_low <= entry_price * 0.97: outcome = "0"
+                elif days_passed >= 8: outcome = "1" if last_close > entry_price else "0"
+                        
+                if outcome != "⏳ TBD":
+                    row_number = index + 2 
+                    updates.append({'range': gspread.utils.rowcol_to_a1(row_number, outcome_col_index), 'values': [[outcome]]})
+                    
+            if updates:
+                worksheet.batch_update(updates)
+                st.success(f"🤖 {tab_name} COMPLETE: Graded {len(updates)} trades!")
+            elif skipped_dates > 0:
+                st.warning(f"⚠️ {tab_name}: Couldn't read the date format for {skipped_dates} rows.")
+            else:
+                st.info(f"ℹ️ {tab_name}: Trades analyzed, but none have hit targets or expired yet.")
+                
     except Exception as e:
-        st.error(f"🚨 AGENT AUDIT CRASHED: {str(e)}")
+        st.error(f"🚨 MASTER AUDIT CRASHED: {str(e)}")
