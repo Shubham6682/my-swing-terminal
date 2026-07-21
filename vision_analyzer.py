@@ -16,6 +16,12 @@ def connect_to_vision_log():
     sheet_id = st.secrets["gcp_service_account"]["sheet_id"]
     return client.open_by_key(sheet_id).worksheet("Vision_Shadow_Log")
 
+# 🟢 THE ARCHITECTURAL FIX: Cache the database connection in local memory.
+# ttl=3000 ensures the Google security token refreshes before it expires (every 50 mins).
+@st.cache_resource(ttl=3000)
+def get_cached_vision_worksheet():
+    return connect_to_vision_log()
+
 def extract_chart_topography(df, window=5):
     """
     Analyzes the last 6 months of data to extract chart geometry:
@@ -93,6 +99,9 @@ def evaluate_and_log_vision_trade(ticker, df):
         overhead_pct, chaos, vision_confidence, "⏳ TBD"
     ]
     
-    worksheet = connect_to_vision_log()
-    worksheet.append_row(row_data)
+    # 🟢 THE FIX: Call the cached connection instead of opening a new one. Cost = 0 Read Requests.
+    worksheet = get_cached_vision_worksheet()
+    
+    # 🟢 THE FIX: 'USER_ENTERED' performs a Blind Append (a pure Write request) without checking formatting.
+    worksheet.append_row(row_data, value_input_option='USER_ENTERED')
     print(f"[VISION LAB SUCCESS] Chart metrics archived for {ticker}")
