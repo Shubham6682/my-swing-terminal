@@ -461,8 +461,8 @@ with tab1:
                                 # Lock ONLY the Agentic AI
                                 st.session_state.shadow_logged_today.append(symbol)
                                 
-                                # 🟢 THE FIX: Take a 1.5 second breath to avoid Google API 429 Crash
-                                time.sleep(1.5) 
+                                # 🟢 THE FIX: Take a 5 second breath to avoid Google API 429 Crash
+                                time.sleep(5) 
                                 
                             except Exception as e:
                                 print(f"Shadow logger bypassed for {symbol}: {e}")
