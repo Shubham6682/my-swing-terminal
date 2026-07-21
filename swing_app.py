@@ -460,8 +460,33 @@ with tab1:
                                 )
                                 # Lock ONLY the Agentic AI
                                 st.session_state.shadow_logged_today.append(symbol)
+                                
+                                # 🟢 THE FIX: Take a 1.5 second breath to avoid Google API 429 Crash
+                                time.sleep(1.5) 
+                                
                             except Exception as e:
                                 print(f"Shadow logger bypassed for {symbol}: {e}")
+
+                        # 4. 👁️ FIRE THE VISIONARY AI (The Chart Architect)
+                        if symbol not in st.session_state.vision_logged_today:
+                            try:
+                                # 🟢 THE FIX: Zero API Calls. Build the 6-month chart using data already in memory!
+                                ticker_df = pd.DataFrame({
+                                    'Close': closes[ticker],
+                                    'High': highs[ticker]
+                                }).dropna().tail(125) # 125 trading days = ~6 months
+                                
+                                if not ticker_df.empty:
+                                    evaluate_and_log_vision_trade(symbol, ticker_df)
+                                    # Lock ONLY the Vision AI
+                                    st.session_state.vision_logged_today.append(symbol)
+                                    
+                                    # 🟢 THE FIX: Take another 1.5 second breath
+                                    time.sleep(1.5)
+                                    
+                            except Exception as e:
+                                print(f"Vision shadow logger bypassed for {symbol}: {e}")
+                                st.error(f"🚨 VISION AI CRASHED ON {symbol}: {str(e)}")
 
                         # 4. 👁️ FIRE THE VISIONARY AI (The Chart Architect)
                         if symbol not in st.session_state.vision_logged_today:
