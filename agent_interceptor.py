@@ -84,13 +84,8 @@ def auto_grade_shadow_log(sheet_id):
     import gspread
     
     try:
-        # 1. Connect using your existing function
         base_worksheet = connect_to_shadow_log(sheet_id)
-        
-        # 2. 🟢 THE UPGRADE: Grab the parent spreadsheet so we can access ANY tab
         spreadsheet = base_worksheet.spreadsheet
-        
-        # 3. 🟢 THE LOOP: Define the exact names of your two shadow logs
         tabs_to_grade = ["Agentic_Shadow_Log", "Vision_Shadow_Log"]
         
         for tab_name in tabs_to_grade:
@@ -98,15 +93,18 @@ def auto_grade_shadow_log(sheet_id):
                 worksheet = spreadsheet.worksheet(tab_name)
             except gspread.exceptions.WorksheetNotFound:
                 st.error(f"🚨 Missing tab in Google Sheets: '{tab_name}'")
-                continue # Skip to the next tab if one is missing
+                continue 
                 
             data = worksheet.get_all_records()
             raw_headers = worksheet.row_values(1)
             
             headers = [str(h).strip() for h in raw_headers]
             
-            if "T8_Final_Outcome" not in headers or "Entry_Price" not in headers: 
-                st.error(f"🚨 {tab_name} ERROR: Missing 'T8_Final_Outcome' or 'Entry_Price' columns.")
+            # 🟢 THE FIX: Dynamically find the price column name
+            price_col = "Entry_Price" if "Entry_Price" in headers else "Current_Price" if "Current_Price" in headers else None
+            
+            if "T8_Final_Outcome" not in headers or not price_col: 
+                st.error(f"🚨 {tab_name} ERROR: Missing 'T8_Final_Outcome' or Price column.")
                 continue
                 
             outcome_col_index = headers.index("T8_Final_Outcome") + 1
@@ -124,7 +122,8 @@ def auto_grade_shadow_log(sheet_id):
                 current_outcome = str(clean_row.get('T8_Final_Outcome', '')).strip()
                 
                 if "TBD" in current_outcome or current_outcome == "":
-                    raw_price = str(clean_row.get('Entry_Price', '0')).replace(',', '').replace('₹', '').strip()
+                    # 🟢 THE FIX: Use the dynamically found price column
+                    raw_price = str(clean_row.get(price_col, '0')).replace(',', '').replace('₹', '').strip()
                     try:
                         entry_price = float(raw_price)
                     except ValueError:
@@ -141,7 +140,7 @@ def auto_grade_shadow_log(sheet_id):
                     
             if not pending_rows: 
                 st.info(f"ℹ️ {tab_name}: No pending trades found (or headers couldn't be parsed).")
-                continue # Skip to the next tab
+                continue 
             
             st.toast(f"🔄 {tab_name}: Analyzing {len(pending_rows)} pending trades...", icon="⏳")
             
