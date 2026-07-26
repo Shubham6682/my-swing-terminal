@@ -93,16 +93,17 @@ def log_trade_journal(trade):
         except (ValueError, TypeError):
             return 0
 
-    # 🟢 Apply the safe converters to your row
+    # 🟢 Added Max_Profit_% and Max_Drawdown_% to the very end of the row payload
     row = [
         trade.get("Date", ""), trade.get("EntryTime", ""), trade.get("Symbol", ""), trade.get("Ticker", ""),
         safe_int(trade.get("Qty", 0)), safe_float(trade.get("BuyPrice", 0.0)), safe_float(trade.get("ExitPrice", 0.0)),
         trade.get("ExitDate", ""), trade.get("ExitTime", ""), safe_float(trade.get("PnL", 0.0)), 
-        trade.get("Target_Label", ""), # <--- UNIFIED HERE
+        trade.get("Target_Label", ""), 
         trade.get("Strategy", ""), safe_float(trade.get("VIX", 0.0)), safe_float(trade.get("Nifty_Trend", 0.0)),
         safe_float(trade.get("RVol", 0.0)), safe_float(trade.get("RSI", 0.0)), safe_float(trade.get("SMA200_Dist", 0.0)),
         safe_float(trade.get("SMA20_Dist", 0.0)), safe_float(trade.get("Wick_Reject", 0.0)), safe_float(trade.get("Nifty_5D", 0.0)),
-        safe_float(trade.get("Trap_Score", 0.0)), safe_float(trade.get("Momentum_Velocity", 0.0)), safe_float(trade.get("AI_Confidence", 0.0))
+        safe_float(trade.get("Trap_Score", 0.0)), safe_float(trade.get("Momentum_Velocity", 0.0)), safe_float(trade.get("AI_Confidence", 0.0)),
+        safe_float(trade.get("Max_Profit_%", 0.0)), safe_float(trade.get("Max_Drawdown_%", 0.0))
     ]
     
     try:
@@ -110,8 +111,13 @@ def log_trade_journal(trade):
         if client:
             sheet = client.open("Swing_Trading_DB").worksheet("Journal")
             if not sheet.row_values(1):
-                headers = ["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "ExitPrice", "ExitDate", "ExitTime", "PnL", "Target_Label", "Strategy", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Trap_Score", "Momentum_Velocity", "AI_Confidence"]
+                # Added the two new columns to the header builder as well
+                headers = ["Date", "EntryTime", "Symbol", "Ticker", "Qty", "BuyPrice", "ExitPrice", "ExitDate", "ExitTime", "PnL", "Target_Label", "Strategy", "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist", "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Trap_Score", "Momentum_Velocity", "AI_Confidence", "Max_Profit_%", "Max_Drawdown_%"]
                 sheet.append_row(headers)
+            
+            # 🟢 THE MISSING PIECE: Actually pushing the row into Google Sheets!
+            sheet.append_row(row, value_input_option='USER_ENTERED')
+            
             return True
     except Exception as e: 
         print(f"Journal Log Error: {e}")
