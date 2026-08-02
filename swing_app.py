@@ -7,10 +7,10 @@ import pytz
 import time
 from streamlit_autorefresh import st_autorefresh
 from analysis import run_advanced_audit
-from ghost_dashboard import render_ghost_portfolio  # 🟢 ADD THIS LINE
+from ghost_dashboard import render_ghost_portfolio  
 
-# 🟢 THE MODULAR IMPORTS
-from ai_core import load_ai_brain, ask_ai_gatekeeper
+# 🟢 THE MODULAR IMPORTS (Updated to include V3)
+from ai_core import load_ai_brain, ask_ai_gatekeeper, load_v3_brain, ask_v3_challenger
 from indicators import calculate_rsi, calculate_bollinger_width
 from database import init_google_sheet, fetch_sheet_data, save_portfolio_cloud, log_trade_journal, log_ai_veto, log_signal_cloud, load_signals_from_cloud, sync_ghost_labels_to_cloud
 from agent_interceptor import evaluate_and_log_shadow_trade, auto_grade_shadow_log, fetch_todays_shadow_log
@@ -23,7 +23,9 @@ ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 today_str = now.strftime("%Y-%m-%d")
 
+# 🟢 LOAD BOTH BRAINS INTO MEMORY
 ai_model = load_ai_brain()
+v3_model = load_v3_brain()
 
 market_open = datetime.time(9, 15)
 market_close = datetime.time(15, 30)
@@ -287,6 +289,7 @@ with tab1:
                             c_mom_vel = round(c_rsi * c_rvol, 2)
                             
                             n_trend = round(float(intraday_pct), 2)
+                            c_nifty_5d = round(float(nifty_5d_trend), 2) # 🟢 Added for V3
                             try: c_vix = round(float(closes['^INDIAVIX'].dropna().iloc[-1]), 2)
                             except: c_vix = 15.0
                             
@@ -295,31 +298,33 @@ with tab1:
                                 'SMA20_Dist': c_sma20_dist, 'Wick_Reject': c_wick_reject,
                                 'Trap_Score': c_trap_score, 'Momentum_Velocity': c_mom_vel
                             }
-                            macro_data_for_ai = {'VIX': c_vix, 'Nifty_Trend': n_trend}
+                            # 🟢 Added Nifty_5D to macro payload
+                            macro_data_for_ai = {'VIX': c_vix, 'Nifty_Trend': n_trend, 'Nifty_5D': c_nifty_5d}
                             
-                            # Get the AI Verdict
-                            is_approved, ai_confidence = ask_ai_gatekeeper(ai_model, stock_data_for_ai, macro_data_for_ai)
-                            ai_confidence = round(float(ai_confidence), 2)
+                            # Get the AI Verdicts from BOTH Brains
+                            v2_approved, v2_confidence = ask_ai_gatekeeper(ai_model, stock_data_for_ai, macro_data_for_ai)
+                            v3_approved, v3_confidence = ask_v3_challenger(v3_model, stock_data_for_ai, macro_data_for_ai)
+                            
+                            final_approval = v2_approved or v3_approved
                             
                             # --- UI UPDATES BASED ON AI ---
                             if c_status in ["🎯 CONFIRMED", "🚀 BREAKOUT"]:
-                                if is_approved:
-                                    bg_color, border_color = "#d4edda", "#28a745" # Green (Full Approval)
+                                if final_approval:
+                                    bg_color, border_color = "#d4edda", "#28a745" 
                                 else:
-                                    bg_color, border_color = "#f8d7da", "#dc3545" # Red (Technical passed, AI Vetoed)
+                                    bg_color, border_color = "#f8d7da", "#dc3545" 
                             else:
-                                bg_color, border_color = "#f8f9fa", "#6c757d" # Gray (Technical failed)
+                                bg_color, border_color = "#f8f9fa", "#6c757d" 
 
                             vol_surge = (c_curr_vol / c_vol_sma20) * 100 if c_vol_sma20 > 0 else 0
-                            ai_badge = "🟢 AI APPROVED" if is_approved else "🛑 AI VETOED"
                             
                             st.markdown(f"""
                             <div style='border: 2px solid {border_color}; border-radius: 8px; padding: 15px; background-color: {bg_color}; color: #333;'>
                                 <h4 style='margin-top:0px; color: #111;'>{custom_sym} System Diagnostics</h4>
-                                <b>Phase 1 Technical:</b> {c_status} &nbsp;|&nbsp; <b>LTP:</b> ₹{c_curr_price:.2f} &nbsp;|&nbsp; <b>Target/Entry:</b> ₹{c_trigger:.2f}<br>
-                                <b>Phase 2 AI Brain:</b> {ai_confidence:.2f}% Confidence ({ai_badge})<br>
+                                <b>Phase 1 Technical:</b> {c_status} &nbsp;|&nbsp; <b>LTP:</b> ₹{c_curr_price:.2f} &nbsp;|&nbsp; <b>Target:</b> ₹{c_trigger:.2f}<br>
+                                <b>V2 Champion:</b> {v2_confidence:.2f}% | <b>V3 Challenger:</b> {v3_confidence:.2f}%<br>
                                 <hr style='margin: 8px 0; border-top: 1px solid #ccc;'>
-                                <small><b>RSI:</b> {c_rsi:.1f} &nbsp;|&nbsp; <b>Vol Surge:</b> {vol_surge:.0f}% &nbsp;|&nbsp; <b>Trap Score:</b> {c_trap_score} &nbsp;|&nbsp; <b>Wick Reject:</b> {c_wick_reject}%</small>
+                                <small><b>RSI:</b> {c_rsi:.1f} &nbsp;|&nbsp; <b>Vol Surge:</b> {vol_surge:.0f}% &nbsp;|&nbsp; <b>Trap:</b> {c_trap_score} &nbsp;|&nbsp; <b>Reject:</b> {c_wick_reject}%</small>
                             </div>
                             """, unsafe_allow_html=True)
                         else: st.warning(f"Not enough historical data to calculate metrics on {custom_sym}.")
@@ -430,7 +435,7 @@ with tab1:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
                     if symbol not in current_holdings and symbol not in st.session_state.blacklist:
                         
-                        # 1. Calculate the AI variables (Runs for all valid setups, regardless of Nifty health)
+                        # 1. Calculate the AI variables
                         c_trap_score = round((c_rvol * c_wick_reject) / (1 + abs(c_sma20_dist)), 2)
                         c_mom_vel = round(c_rsi * c_rvol, 2)
 
@@ -439,109 +444,89 @@ with tab1:
                             'SMA20_Dist': c_sma20_dist, 'Wick_Reject': c_wick_reject,
                             'Trap_Score': c_trap_score, 'Momentum_Velocity': c_mom_vel
                         }
-                        macro_data_for_ai = {'VIX': c_vix, 'Nifty_Trend': n_trend}
+                        # 🟢 ADDED NIFTY_5D FOR V3
+                        macro_data_for_ai = {'VIX': c_vix, 'Nifty_Trend': n_trend, 'Nifty_5D': c_nifty_5d}
 
-                        # 2. Get the V2 Confidence Score (The Champion's Math)
-                        is_approved, ai_confidence = ask_ai_gatekeeper(ai_model, stock_data_for_ai, macro_data_for_ai)
-                        ai_confidence = round(float(ai_confidence), 2)
+                        # 2. Get the V2 Confidence Score (The Champion)
+                        v2_approved, v2_confidence = ask_ai_gatekeeper(ai_model, stock_data_for_ai, macro_data_for_ai)
+                        
+                        # 3. Get the V3 Confidence Score (The Challenger)
+                        v3_approved, v3_confidence = ask_v3_challenger(v3_model, stock_data_for_ai, macro_data_for_ai)
 
-                        # 3. 🟢 FIRE THE AGENTIC INTERCEPTOR (The Challenger)
+                        # 🟢 4. THE DUAL-CORE DECISION MATRIX
+                        final_approval = False
+                        strategy_tag = ""
+                        
+                        if v2_approved and v3_approved:
+                            final_approval = True
+                            strategy_tag = "V2_V3_Agreement"
+                        elif v2_approved and not v3_approved:
+                            final_approval = True
+                            strategy_tag = "V2_Only"
+                        elif v3_approved and not v2_approved:
+                            final_approval = True
+                            strategy_tag = "V3_Only"
+
+                        # 5. 🟢 FIRE THE AGENTIC INTERCEPTOR
                         if symbol not in st.session_state.shadow_logged_today:
-                            # --- 🧠 BRAIN 2: THE MACRO ECONOMIST ---
                             try:
                                 evaluate_and_log_shadow_trade(
                                     ticker=symbol,
                                     entry_price=curr_price,
-                                    traditional_score=ai_confidence,
+                                    traditional_score=v2_confidence, # Using V2 as the baseline shadow reference
                                     live_vix=c_vix,
                                     nifty_intraday_pct=n_trend,
                                     is_market_halted=not is_safe_to_buy, 
                                     sheet_id=st.secrets["gcp_service_account"]["sheet_id"] 
                                 )
-                                # Lock ONLY the Agentic AI
                                 st.session_state.shadow_logged_today.append(symbol)
-                                
-                                # 🟢 THE FIX: Take a 5 second breath to avoid Google API 429 Crash
                                 time.sleep(5) 
-                                
                             except Exception as e:
                                 print(f"Shadow logger bypassed for {symbol}: {e}")
 
-                        # 4. 👁️ FIRE THE VISIONARY AI (The Chart Architect)
+                        # 6. 👁️ FIRE THE VISIONARY AI 
                         if symbol not in st.session_state.vision_logged_today:
                             try:
-                                # 🟢 THE FIX: Zero API Calls. Build the 6-month chart using data already in memory!
-                                ticker_df = pd.DataFrame({
-                                    'Close': closes[ticker],
-                                    'High': highs[ticker]
-                                }).dropna().tail(125) # 125 trading days = ~6 months
-                                
+                                ticker_df = pd.DataFrame({'Close': closes[ticker], 'High': highs[ticker]}).dropna().tail(125) 
                                 if not ticker_df.empty:
                                     evaluate_and_log_vision_trade(symbol, ticker_df)
-                                    # Lock ONLY the Vision AI
                                     st.session_state.vision_logged_today.append(symbol)
-                                    
-                                    # 🟢 THE FIX: Take another 1.5 second breath
                                     time.sleep(1.5)
-                                    
                             except Exception as e:
                                 print(f"Vision shadow logger bypassed for {symbol}: {e}")
-                                st.error(f"🚨 VISION AI CRASHED ON {symbol}: {str(e)}")
 
-                        # 4. 👁️ FIRE THE VISIONARY AI (The Chart Architect)
-                        if symbol not in st.session_state.vision_logged_today:
-                            try:
-                                # 🟢 THE FIX: Zero API Calls. Build the 6-month chart using data already in memory!
-                                ticker_df = pd.DataFrame({
-                                    'Close': closes[ticker],
-                                    'High': highs[ticker]
-                                }).dropna().tail(125) # 125 trading days = ~6 months
-                                
-                                if not ticker_df.empty:
-                                    evaluate_and_log_vision_trade(symbol, ticker_df)
-                                    # Lock ONLY the Vision AI
-                                    st.session_state.vision_logged_today.append(symbol)
-                            except Exception as e:
-                                print(f"Vision shadow logger bypassed for {symbol}: {e}")
-                                st.error(f"🚨 VISION AI CRASHED ON {symbol}: {str(e)}")
-
-                        # 4. THE REAL PORTFOLIO TRADER (Only executes if Market is Safe)
+                        # 7. THE REAL PORTFOLIO TRADER
                         if status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
-                            if is_approved:
+                            if final_approval:
                                 new_trade = {
                                     "Date": now.strftime("%Y-%m-%d"), "EntryTime": now.strftime("%H:%M:%S"),
                                     "Symbol": symbol, "Ticker": ticker, "Qty": 1, "BuyPrice": curr_price,
-                                    "StopPrice": curr_price * (1 - (risk_per_trade/100)), "Strategy": mode,
+                                    "StopPrice": curr_price * (1 - (risk_per_trade/100)), 
+                                    "Strategy": strategy_tag,  # 🟢 THE BOT LOGS THE EXACT BRAIN COMBINATION HERE
                                     "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
                                     "RSI": c_rsi, "SMA200_Dist": c_dist,
                                     "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
-                                    "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel, "AI_Confidence": ai_confidence,
+                                    "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel, 
+                                    "AI_Confidence": max(v2_confidence, v3_confidence), # Record the highest confidence
                                     "Max_Profit_%": 0.0, "Max_Drawdown_%": 0.0
                                 }
                                 st.session_state.portfolio.append(new_trade)
                                 new_trades_added = True
-                                st.session_state.notifications.append(f"🟢 {now.strftime('%H:%M')} - AI APPROVED ({ai_confidence}%): {symbol} at ₹{curr_price:.2f}")
-                                st.toast(f"🤖 AI Bought: {symbol}")
+                                st.session_state.notifications.append(f"🟢 {now.strftime('%H:%M')} - {strategy_tag}: {symbol} at ₹{curr_price:.2f}")
+                                st.toast(f"🤖 Bot Bought: {symbol} ({strategy_tag})")
                             else:
-                                # 🟢 VULNERABILITY 2: Check memory before logging
+                                # Both V2 and V3 completely rejected it
                                 if symbol not in st.session_state.vetoed_today:
-                                    # 1. Send the notification to your dashboard
-                                    st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - AI VETOED ({ai_confidence}%): {symbol}")
-                                    
-                                    # 2. Package the exact mathematical setup
+                                    st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - BOTH AI VETOED: {symbol}")
                                     vetoed_setup = {
                                         "Date": now.strftime("%Y-%m-%d"), "Time": now.strftime("%H:%M:%S"),
-                                        "Symbol": symbol, "Price": curr_price, "AI_Confidence": ai_confidence,
+                                        "Symbol": symbol, "Price": curr_price, "AI_Confidence": v2_confidence,
                                         "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
                                         "RSI": c_rsi, "SMA200_Dist": c_dist,
                                         "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
                                         "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel
                                     }
-                                    
-                                    # 3. Send it to the new Google Sheet Tab for V3 training
                                     log_ai_veto(vetoed_setup)
-                                    
-                                    # 4. Lock the symbol in memory so it doesn't spam on the next 5-min refresh
                                     st.session_state.vetoed_today.append(symbol)
             except: continue
 
