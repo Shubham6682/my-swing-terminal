@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import joblib
 import pandas as pd
@@ -9,7 +10,7 @@ EXPECTED_FEATURES = [
     'Trap_Score', 'Momentum_Velocity', 'VIX', 'Nifty_Trend'
 ]
 
-# V3 FEATURES (Must exactly match your CSV generation script)
+# V3 FEATURES
 V3_EXPECTED_FEATURES = [
     "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist", 
     "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Trap_Score", "Momentum_Velocity"
@@ -27,11 +28,19 @@ def load_ai_brain():
 @st.cache_resource
 def load_v3_brain():
     try:
+        # 🟢 ABSOLUTE PATH FIX: Guarantees Streamlit Cloud locates the file
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        model_path = os.path.join(current_dir, "v3_xgboost_brain.json")
+        
+        if not os.path.exists(model_path):
+            st.error(f"🚨 V3 File Missing: Could not find 'v3_xgboost_brain.json' at {model_path}")
+            return None
+            
         model = xgb.XGBClassifier()
-        model.load_model("v3_xgboost_brain.json")
+        model.load_model(model_path)
         return model
     except Exception as e:
-        print(f"⚠️ V3 Brain Failed to Load: {e}")
+        st.error(f"⚠️ V3 Brain Load Error: {e}")
         return None
 
 def ask_ai_gatekeeper(ai_model, stock_data, macro_data, threshold=0.70):
@@ -82,5 +91,6 @@ def ask_v3_challenger(v3_model, stock_data, macro_data, threshold=0.50):
         
         return is_approved, confidence_pct
     except Exception as e:
-        print(f"V3 Inference Error: {e}")
+        # 🟢 PRINT INFERENCE ERRORS TO TERMINAL LOGS
+        print(f"🚨 V3 Inference Error: {e}")
         return False, 0.0
