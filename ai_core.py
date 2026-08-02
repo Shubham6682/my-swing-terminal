@@ -3,13 +3,13 @@ import joblib
 import pandas as pd
 import xgboost as xgb
 
-# 🟢 V2 FEATURES
+# V2 FEATURES
 EXPECTED_FEATURES = [
     'RVol', 'RSI', 'SMA200_Dist', 'SMA20_Dist', 'Wick_Reject',
     'Trap_Score', 'Momentum_Velocity', 'VIX', 'Nifty_Trend'
 ]
 
-# 🟢 V3 FEATURES (Must exactly match your CSV generation script)
+# V3 FEATURES (Must exactly match your CSV generation script)
 V3_EXPECTED_FEATURES = [
     "VIX", "Nifty_Trend", "RVol", "RSI", "SMA200_Dist", 
     "SMA20_Dist", "Wick_Reject", "Nifty_5D", "Trap_Score", "Momentum_Velocity"
@@ -35,7 +35,8 @@ def load_v3_brain():
         return None
 
 def ask_ai_gatekeeper(ai_model, stock_data, macro_data, threshold=0.70):
-    if ai_model is None: return False, 0.0
+    if ai_model is None: 
+        return False, 0.0
     try:
         raw_features = {
             'RVol': float(stock_data.get('RVol', 1.0)),
@@ -58,8 +59,8 @@ def ask_ai_gatekeeper(ai_model, stock_data, macro_data, threshold=0.70):
         return False, 0.0
 
 def ask_v3_challenger(v3_model, stock_data, macro_data, threshold=0.50):
-    # Notice the V3 threshold is 0.50 since its baseline precision is 53.4%
-    if v3_model is None: return False, 0.0
+    if v3_model is None: 
+        return False, 0.0
     try:
         raw_features = {
             "VIX": float(macro_data.get('VIX', 15.0)),
@@ -75,7 +76,6 @@ def ask_v3_challenger(v3_model, stock_data, macro_data, threshold=0.50):
         }
         features = pd.DataFrame([raw_features])[V3_EXPECTED_FEATURES]
         
-        # XGBoost output
         win_probability = v3_model.predict_proba(features)[0][1]
         confidence_pct = round(win_probability * 100, 2)
         is_approved = win_probability >= threshold
