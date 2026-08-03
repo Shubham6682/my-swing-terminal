@@ -590,16 +590,17 @@ with tab2:
             pnl = cur_val - inv_val
             pnl_pct = (pnl / inv_val) * 100
 
-            # 🟢 1. START MFE/MAE INJECTION
-            if 'Max_Profit_%' not in trade: trade['Max_Profit_%'] = 0.0
-            if 'Max_Drawdown_%' not in trade: trade['Max_Drawdown_%'] = 0.0
+            # 🟢 1. START MFE/MAE INJECTION (FIXED INFINITE RE-RUN BUG)
+            current_pnl_pct = round(pnl_pct, 2)
+            max_pnl = float(trade.get('Max_Profit_%', 0.0))
+            max_dd = float(trade.get('Max_Drawdown_%', 0.0))
 
-            if pnl_pct > trade['Max_Profit_%']:
-                trade['Max_Profit_%'] = round(pnl_pct, 2)
+            if current_pnl_pct > max_pnl:
+                trade['Max_Profit_%'] = current_pnl_pct
                 portfolio_changed = True
 
-            if pnl_pct < trade['Max_Drawdown_%']:
-                trade['Max_Drawdown_%'] = round(pnl_pct, 2)
+            if current_pnl_pct < max_dd:
+                trade['Max_Drawdown_%'] = current_pnl_pct
                 portfolio_changed = True
             # 🟢 END MFE/MAE INJECTION
             
