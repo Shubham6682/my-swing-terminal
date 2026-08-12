@@ -4,6 +4,7 @@ import gspread
 import streamlit as st
 import yfinance as yf
 import pytz
+import pandas as pd
 from oauth2client.service_account import ServiceAccountCredentials
 
 def load_agent_rules(filepath="agent_rules.json"):
@@ -25,7 +26,6 @@ def fetch_todays_shadow_log(sheet_id):
         ist = pytz.timezone('Asia/Kolkata')
         today_str = datetime.datetime.now(ist).strftime("%Y-%m-%d")
         
-        # Pulls the tickers from the sheet if the timestamp matches today's date
         return [row['Ticker'] for row in data if str(row.get('Date_Time', '')).startswith(today_str)]
     except Exception as e:
         print(f"[AGENT MEMORY ERROR] Failed to fetch memory: {e}")
@@ -77,12 +77,6 @@ def auto_grade_shadow_log(sheet_id):
     Autonomously scans BOTH Shadow Logs (Agentic and Vision), pulls bulk market history, 
     and stamps 1 (Win) or 0 (Loss) based on your strict 3-5-3 rules inside a T+8 window.
     """
-    import pandas as pd
-    import streamlit as st
-    import datetime
-    import pytz
-    import gspread
-    
     try:
         base_worksheet = connect_to_shadow_log(sheet_id)
         spreadsheet = base_worksheet.spreadsheet
@@ -100,7 +94,6 @@ def auto_grade_shadow_log(sheet_id):
             
             headers = [str(h).strip() for h in raw_headers]
             
-            # 🟢 THE FIX: Dynamically find the price column name
             price_col = "Entry_Price" if "Entry_Price" in headers else "Current_Price" if "Current_Price" in headers else None
             
             if "T8_Final_Outcome" not in headers or not price_col: 
@@ -122,7 +115,6 @@ def auto_grade_shadow_log(sheet_id):
                 current_outcome = str(clean_row.get('T8_Final_Outcome', '')).strip()
                 
                 if "TBD" in current_outcome or current_outcome == "":
-                    # 🟢 THE FIX: Use the dynamically found price column
                     raw_price = str(clean_row.get(price_col, '0')).replace(',', '').replace('₹', '').strip()
                     try:
                         entry_price = float(raw_price)
@@ -146,6 +138,8 @@ def auto_grade_shadow_log(sheet_id):
             
             live_data = yf.download(list(unique_tickers), period="3mo", threads=False, progress=False)
             
+            if live_data.empty: continue
+
             for index, clean_row, yf_ticker, entry_price in pending_rows:
                 raw_date = str(clean_row.get('Date_Time', clean_row.get('Date', ''))).split(" ")[0].strip()
                 entry_date = None
@@ -164,15 +158,24 @@ def auto_grade_shadow_log(sheet_id):
                 days_passed = (today - entry_date).days
                 
                 try:
-                    if len(unique_tickers) == 1:
-                        stock_df = live_data.copy()
+                    # 🟢 MULTI-INDEX & SINGLE-INDEX SAFE EXTRACTION
+                    if isinstance(live_data.columns, pd.MultiIndex):
+                        if yf_ticker in live_data['Close'].columns:
+                            high_series = live_data['High'][yf_ticker]
+                            low_series = live_data['Low'][yf_ticker]
+                            close_series = live_data['Close'][yf_ticker]
+                        else:
+                            continue
                     else:
-                        if 'Close' not in live_data.columns or yf_ticker not in live_data['Close']: continue
-                        stock_df = pd.DataFrame({
-                            'High': live_data['High'][yf_ticker],
-                            'Low': live_data['Low'][yf_ticker],
-                            'Close': live_data['Close'][yf_ticker]
-                        }).dropna()
+                        high_series = live_data['High']
+                        low_series = live_data['Low']
+                        close_series = live_data['Close']
+
+                    stock_df = pd.DataFrame({
+                        'High': high_series,
+                        'Low': low_series,
+                        'Close': close_series
+                    }).dropna()
                 except Exception:
                     continue
                     
