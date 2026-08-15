@@ -230,7 +230,7 @@ with tab1:
                 nifty_perf = nifty_closes.iloc[-1] / nifty_closes.iloc[-60]
                  
         st.markdown("### 🔍 Custom Watchlist Analyzer")
-        c_input = st.text_input("Type any NSE Ticker to test the math (e.g., ZOMATO, RVNL, SUZLON):", "").strip().upper()
+        c_input = st.text_input("Type any NSE Ticker to test the math (e.g., SBIN, RVNL, SUZLON):", "").strip().upper()
         
         if c_input:
             custom_sym = c_input.replace('.NS', '')
