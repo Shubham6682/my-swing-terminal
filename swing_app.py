@@ -495,25 +495,36 @@ with tab1:
                             except Exception as e:
                                 print(f"Vision shadow logger bypassed for {symbol}: {e}")
 
-                        # 7. THE REAL PORTFOLIO TRADER
+                       # 7. THE REAL PORTFOLIO TRADER
                         if status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
                             if final_approval:
+                                
+                                capital_per_trade = 10000 
+                                
+                                # 🟢 NEW: If price > 10k, buy 1 share. Otherwise, allocate 10k evenly.
+                                if curr_price > capital_per_trade:
+                                    calculated_qty = 1
+                                else:
+                                    calculated_qty = int(capital_per_trade / curr_price)
+
                                 new_trade = {
                                     "Date": now.strftime("%Y-%m-%d"), "EntryTime": now.strftime("%H:%M:%S"),
-                                    "Symbol": symbol, "Ticker": ticker, "Qty": 1, "BuyPrice": curr_price,
+                                    "Symbol": symbol, "Ticker": ticker, 
+                                    "Qty": calculated_qty, 
+                                    "BuyPrice": curr_price,
                                     "StopPrice": curr_price * (1 - (risk_per_trade/100)), 
-                                    "Strategy": strategy_tag,  # 🟢 THE BOT LOGS THE EXACT BRAIN COMBINATION HERE
+                                    "Strategy": strategy_tag, 
                                     "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
                                     "RSI": c_rsi, "SMA200_Dist": c_dist,
                                     "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
                                     "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel, 
-                                    "AI_Confidence": max(v2_confidence, v3_confidence), # Record the highest confidence
+                                    "AI_Confidence": max(v2_confidence, v3_confidence),
                                     "Max_Profit_%": 0.0, "Max_Drawdown_%": 0.0
                                 }
                                 st.session_state.portfolio.append(new_trade)
                                 new_trades_added = True
-                                st.session_state.notifications.append(f"🟢 {now.strftime('%H:%M')} - {strategy_tag}: {symbol} at ₹{curr_price:.2f}")
-                                st.toast(f"🤖 Bot Bought: {symbol} ({strategy_tag})")
+                                st.session_state.notifications.append(f"🟢 {now.strftime('%H:%M')} - {strategy_tag}: Bought {calculated_qty}x {symbol}")
+                                st.toast(f"🤖 Bot Bought: {calculated_qty} shares of {symbol}")
                             else:
                                 # Both V2 and V3 completely rejected it
                                 if symbol not in st.session_state.vetoed_today:
