@@ -718,179 +718,201 @@ with tab2:
     else: 
         st.info("Portfolio Empty. Go to Scanner to find stocks.")
 
-# --- TAB 3: AI CALIBRATION DECK ---
+# --- TAB 3: MASTER QUANT AUDIT & STRATEGY DASHBOARD ---
 with tab3:
-    st.header("🧠 AI Calibration & Quant Audit")
-    st.markdown("Analyze model accuracy, audit shadow performance, and track vetoed setups.")
+    st.header("📊 Master Quant Analytics")
+    st.markdown("Audit mathematical edge across live portfolios, background shadow logs, and AI vetoes.")
 
-    if st.button("🔄 Force Reload DBs"):
+    if st.button("🔄 Force Reload Database"):
         st.cache_resource.clear()
         st.session_state.journal = fetch_sheet_data("Journal")
         st.rerun()
     st.divider()
 
-    # Load the live Journal for existing modules
-    df_j = pd.DataFrame(st.session_state.journal) if st.session_state.journal else pd.DataFrame()
-    
-    # 🟢 1. EXISTING INDEPENDENT MODULES
-    if 'show_ghost' not in st.session_state: st.session_state.show_ghost = False
-    if 'show_audit' not in st.session_state: st.session_state.show_audit = False
+    # Create three distinct sub-tabs aligning with your 3 Google Sheets
+    sub_tab1, sub_tab2, sub_tab3 = st.tabs([
+        "🕵️ Agentic Shadow Analyzer (Incubation)", 
+        "📓 Journal Analyzer (Live Capital)", 
+        "🛡️ AI Veto Tracker (Capital Saved)"
+    ])
 
-    c_btn1, c_btn2 = st.columns(2)
-    if c_btn1.button("👻 Toggle Ghost Portfolio Tracker", use_container_width=True):
-        st.session_state.show_ghost = not st.session_state.show_ghost
+    # ==========================================
+    # 1. AGENTIC SHADOW ANALYZER
+    # ==========================================
+    with sub_tab1:
+        st.subheader("🕵️ Agentic Shadow Analyzer")
+        st.caption("Evaluating the mathematical edge of T+8 paper trades from the Agentic_Shadow_Log.")
         
-    if c_btn2.button("📊 Toggle Legacy Performance Audit", use_container_width=True):
-        st.session_state.show_audit = not st.session_state.show_audit
-
-    if st.session_state.show_ghost:
-        render_ghost_portfolio()
-
-    if st.session_state.show_audit:
-        if not df_j.empty and 'PnL' in df_j.columns:
-            run_advanced_audit(df_j)
-        else:
-            st.warning("Not enough closed trades in the Journal to run the Legacy Audit.")
+        try:
+            shadow_data = fetch_sheet_data("Agentic_Shadow_Log")
+            df_shadow = pd.DataFrame(shadow_data)
             
-    st.divider()
-
-   # 🟢 2. NEW: V3 INCUBATION AUDIT (Agentic Shadow Log)
-    st.subheader("🔬 V3 Incubation Audit (Paper / Shadow Trades)")
-    st.markdown("Evaluating the mathematical edge of all T+8 paper trades to determine when V3 is ready for live capital.")
-    
-    try:
-        # Securely fetch the Shadow Log using your existing database.py function
-        shadow_data = fetch_sheet_data("Agentic_Shadow_Log")
-        df_shadow = pd.DataFrame(shadow_data)
-        
-        if not df_shadow.empty and 'T8_Final_Outcome' in df_shadow.columns:
-            # Filter out pending trades
-            df_shadow = df_shadow[~df_shadow['T8_Final_Outcome'].astype(str).str.contains("TBD")]
-            
-            if not df_shadow.empty:
-                # 1. Clean outcomes
-                df_shadow['Outcome_Num'] = pd.to_numeric(df_shadow['T8_Final_Outcome'], errors='coerce')
-                df_shadow = df_shadow.dropna(subset=['Outcome_Num'])
+            if not df_shadow.empty and 'T8_Final_Outcome' in df_shadow.columns:
+                df_shadow = df_shadow[~df_shadow['T8_Final_Outcome'].astype(str).str.contains("TBD")]
                 
-                # 2. Extract Confidence Series safely as a full Series
-                if 'AI_Confidence' in df_shadow.columns:
-                    conf_col = df_shadow['AI_Confidence']
-                elif 'Traditional_Score' in df_shadow.columns:
-                    conf_col = df_shadow['Traditional_Score']
-                elif 'Score' in df_shadow.columns:
-                    conf_col = df_shadow['Score']
+                if not df_shadow.empty:
+                    # Clean data and outcomes
+                    df_shadow['Outcome_Num'] = pd.to_numeric(df_shadow['T8_Final_Outcome'], errors='coerce')
+                    df_shadow = df_shadow.dropna(subset=['Outcome_Num'])
+                    
+                    # Ensure Confidence is a series
+                    conf_col = df_shadow.get('AI_Confidence', df_shadow.get('Traditional_Score', pd.Series(0, index=df_shadow.index)))
+                    df_shadow['AI_Confidence'] = pd.to_numeric(conf_col, errors='coerce').fillna(0)
+                    df_shadow['Clean_Symbol'] = df_shadow['Symbol'].astype(str).str.replace('.NS', '', regex=False)
+
+                    # Universe Splitter Toggle
+                    universe_filter = st.radio(
+                        "Select Market Universe to Audit:", 
+                        ["Nifty 50 (Streamlit Live)", "Nifty 500 (GitHub Background)"],
+                        horizontal=True
+                    )
+                    
+                    # Filter dataset based on selection
+                    if "Nifty 50" in universe_filter:
+                        df_target = df_shadow[df_shadow['Clean_Symbol'].isin(NIFTY_50)]
+                    else:
+                        df_target = df_shadow[~df_shadow['Clean_Symbol'].isin(NIFTY_50)]
+                    
+                    if not df_target.empty:
+                        wins = df_target[df_target['Outcome_Num'] == 1]
+                        losses = df_target[df_target['Outcome_Num'] == 0]
+                        total_shadow = len(df_target)
+                        shadow_win_rate = (len(wins) / total_shadow * 100) if total_shadow > 0 else 0
+                        
+                        # Assuming standard +5% win and -3% loss strictly for Est PF
+                        gross_profit_est = len(wins) * 5.0
+                        gross_loss_est = len(losses) * 3.0
+                        shadow_pf = (gross_profit_est / gross_loss_est) if gross_loss_est > 0 else float('inf')
+
+                        st.markdown(f"### {universe_filter.split(' ')[0]} Performance Overview")
+                        c_sa1, c_sa2, c_sa3 = st.columns(3)
+                        c_sa1.metric("Closed Shadow Trades", f"{total_shadow}")
+                        c_sa2.metric("Win Rate", f"{shadow_win_rate:.1f}%", f"{len(wins)}W - {len(losses)}L")
+                        pf_display = f"{shadow_pf:.2f}" if shadow_pf != float('inf') else "∞"
+                        c_sa3.metric("Est. Profit Factor", pf_display, "Target: > 1.30")
+
+                        st.markdown("**AI Confidence vs. Win Rate Breakdown**")
+                        bins = [0, 50, 55, 60, 65, 70, 100]
+                        labels = ['< 50%', '50% - 55%', '55% - 60%', '60% - 65%', '65% - 70%', '70%+']
+                        df_target['Confidence_Tier'] = pd.cut(df_target['AI_Confidence'], bins=bins, labels=labels, include_lowest=True)
+                        
+                        tier_rows = []
+                        for label in labels:
+                            group = df_target[df_target['Confidence_Tier'] == label]
+                            group_total = len(group)
+                            if group_total > 0:
+                                group_wins = len(group[group['Outcome_Num'] == 1])
+                                group_wr = (group_wins / group_total * 100)
+                                tier_rows.append({
+                                    'Confidence Tier': label,
+                                    'Total Setups': group_total,
+                                    'Win Rate': f"{group_wr:.1f}%"
+                                })
+                        
+                        if tier_rows:
+                            st.dataframe(pd.DataFrame(tier_rows), use_container_width=True, hide_index=True)
+                        else:
+                            st.caption("No data available in confidence tiers yet.")
+                    else:
+                        st.info(f"No completed T+8 trades found for {universe_filter}.")
                 else:
-                    conf_col = pd.Series(0, index=df_shadow.index)
-
-                df_shadow['AI_Confidence'] = pd.to_numeric(conf_col, errors='coerce').fillna(0)
-                
-                wins = df_shadow[df_shadow['Outcome_Num'] == 1]
-                losses = df_shadow[df_shadow['Outcome_Num'] == 0]
-                total_shadow = len(df_shadow)
-                shadow_win_rate = (len(wins) / total_shadow * 100) if total_shadow > 0 else 0
-                
-                # Estimate gross returns assuming standard 5% win / 3% stop loss
-                gross_profit_est = len(wins) * 5.0
-                gross_loss_est = len(losses) * 3.0
-                shadow_pf = (gross_profit_est / gross_loss_est) if gross_loss_est > 0 else float('inf')
-
-                c_sa1, c_sa2, c_sa3 = st.columns(3)
-                c_sa1.metric("Closed Shadow Trades", f"{total_shadow}", "Target: 40-50")
-                c_sa2.metric("Shadow Win Rate", f"{shadow_win_rate:.1f}%", f"{len(wins)}W - {len(losses)}L")
-                pf_display = f"{shadow_pf:.2f}" if shadow_pf != float('inf') else "∞"
-                c_sa3.metric("Est. Profit Factor", pf_display, "Target: > 1.30")
-
-                st.markdown("**AI Confidence vs. Win Rate (Shadow Log)**")
-                bins = [0, 55, 60, 65, 70, 100]
-                labels = ['< 55%', '55% - 60%', '60% - 65%', '65% - 70%', '70%+']
-                df_shadow['Confidence_Tier'] = pd.cut(df_shadow['AI_Confidence'], bins=bins, labels=labels, include_lowest=True)
-                
-                # Resilient tier breakdown loop (avoids pandas version deprecation errors)
-                tier_rows = []
-                for label in labels:
-                    group = df_shadow[df_shadow['Confidence_Tier'] == label]
-                    group_total = len(group)
-                    group_wins = len(group[group['Outcome_Num'] == 1])
-                    group_wr = (group_wins / group_total * 100) if group_total > 0 else 0.0
-                    tier_rows.append({
-                        'Confidence Tier': label,
-                        'Total Trades': group_total,
-                        'Win Rate': f"{group_wr:.1f}%"
-                    })
-                
-                tier_df = pd.DataFrame(tier_rows)
-                st.dataframe(tier_df, use_container_width=True, hide_index=True)
+                    st.info("Shadow log has no completed trades yet. All are pending.")
             else:
-                st.info("Shadow log has no completed T+8 trades yet. Awaiting agent evaluations.")
-        else:
-            st.info("Shadow log is empty or missing 'T8_Final_Outcome' column.")
-    except Exception as e:
-        st.error(f"Could not load Shadow Log Audit: {e}")
+                st.info("Shadow log is empty or missing 'T8_Final_Outcome' column.")
+        except Exception as e:
+            st.error(f"Could not load Shadow Log Audit: {e}")
 
-    st.divider()
-
-    # 🟢 3. EXISTING: THE THRESHOLD OPTIMIZER (Live Journal)
-    if not df_j.empty and 'PnL' in df_j.columns:
-        df_j['PnL'] = df_j['PnL'].astype(str).str.replace(r'[₹,a-zA-Z\s]', '', regex=True)
-        df_j['PnL'] = pd.to_numeric(df_j['PnL'], errors='coerce').fillna(0)
+    # ==========================================
+    # 2. JOURNAL ANALYZER (Live Capital)
+    # ==========================================
+    with sub_tab2:
+        st.subheader("📓 Journal Analyzer (Live Capital)")
+        st.caption("Evaluating deployed capital, Brain head-to-head metrics, and Risk efficiency.")
         
-        if 'AI_Confidence' not in df_j.columns: df_j['AI_Confidence'] = 70.0
-        df_j['AI_Confidence'] = pd.to_numeric(df_j['AI_Confidence'], errors='coerce').fillna(70.0)
-
-        c1, c2 = st.columns([2, 1])
-
-        with c1:
-            st.subheader("🎛️ Live Threshold Optimizer")
-            st.caption("Simulate how stricter AI standards would have impacted your historical execution.")
+        df_j = pd.DataFrame(st.session_state.journal) if st.session_state.journal else pd.DataFrame()
+        
+        if not df_j.empty and 'PnL' in df_j.columns:
+            # Clean Live Metrics
+            df_j['PnL'] = df_j['PnL'].astype(str).str.replace(r'[₹,a-zA-Z\s]', '', regex=True)
+            df_j['PnL'] = pd.to_numeric(df_j['PnL'], errors='coerce').fillna(0)
+            df_j['AI_Confidence'] = pd.to_numeric(df_j.get('AI_Confidence', 70.0), errors='coerce').fillna(70.0)
+            df_j['Strategy'] = df_j.get('Strategy', 'Legacy')
             
-            # Lowered the minimum to 50% to accommodate the V3 Challenger logic
-            sim_threshold = st.slider("Minimum AI Confidence Threshold (%)", min_value=50.0, max_value=99.0, value=70.0, step=1.0)
-            
-            sim_trades = df_j[df_j['AI_Confidence'] >= sim_threshold]
-            vetoed_by_sim = df_j[df_j['AI_Confidence'] < sim_threshold]
-            
-            sim_pnl = sim_trades['PnL'].sum()
-            sim_wins = len(sim_trades[sim_trades['PnL'] > 0])
-            sim_total = len(sim_trades)
-            sim_rate = (sim_wins / sim_total) * 100 if sim_total > 0 else 0.0
-            
-            saved_losses = len(vetoed_by_sim[vetoed_by_sim['PnL'] < 0])
-            missed_wins = len(vetoed_by_sim[vetoed_by_sim['PnL'] > 0])
-            
-            k1, k2, k3 = st.columns(3)
-            k1.metric("Simulated Net PnL", f"₹{sim_pnl:,.2f}")
-            k2.metric("Simulated Win Rate", f"{sim_rate:.1f}%")
-            k3.metric("Simulated Trades", sim_total)
-            
-            if sim_threshold > 50.0:
-                st.info(f"💡 **Simulation Result:** By raising your threshold to {sim_threshold}%, you would have avoided **{saved_losses} losing trades**, but missed out on **{missed_wins} winning trades**.")
-            
-            st.markdown("#### Confidence vs. PnL Distribution")
-            st.scatter_chart(sim_trades, x="AI_Confidence", y="PnL")
-
-            # 🟢 NEW: MFE AUDIT (Maximum Favorable Excursion) injected here
-            st.subheader("📈 Live Risk Management & Trailing Stop Efficiency")
-            if 'Max_Profit_%' in df_j.columns:
-                df_j['Max_Profit_%'] = pd.to_numeric(df_j['Max_Profit_%'], errors='coerce').fillna(0)
-                wins_live = df_j[df_j['PnL'] > 0]
-                losses_live = df_j[df_j['PnL'] <= 0]
+            # --- HEAD TO HEAD: V2 vs V3 ---
+            st.markdown("### Brain Head-to-Head Scorecard")
+            strat_rows = []
+            for strat in df_j['Strategy'].unique():
+                s_df = df_j[df_j['Strategy'] == strat]
+                s_wins = s_df[s_df['PnL'] > 0]
+                s_losses = s_df[s_df['PnL'] <= 0]
+                s_total = len(s_df)
+                s_wr = (len(s_wins) / s_total * 100) if s_total > 0 else 0
+                s_gross_prof = s_wins['PnL'].sum()
+                s_gross_loss = abs(s_losses['PnL'].sum())
+                s_pf = (s_gross_prof / s_gross_loss) if s_gross_loss > 0 else float('inf')
                 
-                avg_mfe_wins = wins_live['Max_Profit_%'].mean() if not wins_live.empty else 0
-                avg_mfe_losses = losses_live['Max_Profit_%'].mean() if not losses_live.empty else 0
+                strat_rows.append({
+                    'AI Strategy Tag': strat,
+                    'Total Trades': s_total,
+                    'Win Rate': f"{s_wr:.1f}%",
+                    'Net PnL': f"₹{s_df['PnL'].sum():.2f}",
+                    'Profit Factor': f"{s_pf:.2f}" if s_pf != float('inf') else "∞"
+                })
+            st.dataframe(pd.DataFrame(strat_rows), use_container_width=True, hide_index=True)
+            st.divider()
+
+            c1, c2 = st.columns(2)
+            
+            # --- THRESHOLD OPTIMIZER ---
+            with c1:
+                st.markdown("### 🎛️ Live Threshold Optimizer")
+                sim_threshold = st.slider("Min. AI Confidence Threshold (%)", min_value=50.0, max_value=99.0, value=65.0, step=1.0)
                 
-                col_m1, col_m2 = st.columns(2)
-                with col_m1:
-                    st.metric("Avg Peak Profit on Winning Trades", f"+{avg_mfe_wins:.2f}%")
-                    st.caption("Shows how closely your trailing stop locks in the peak.")
-                with col_m2:
+                sim_trades = df_j[df_j['AI_Confidence'] >= sim_threshold]
+                vetoed_by_sim = df_j[df_j['AI_Confidence'] < sim_threshold]
+                
+                sim_pnl = sim_trades['PnL'].sum()
+                sim_total = len(sim_trades)
+                sim_wins = len(sim_trades[sim_trades['PnL'] > 0])
+                sim_rate = (sim_wins / sim_total * 100) if sim_total > 0 else 0.0
+                
+                s_c1, s_c2 = st.columns(2)
+                s_c1.metric("Simulated Net PnL", f"₹{sim_pnl:,.2f}")
+                s_c2.metric("Simulated Win Rate", f"{sim_rate:.1f}%")
+                
+                saved_losses = len(vetoed_by_sim[vetoed_by_sim['PnL'] < 0])
+                missed_wins = len(vetoed_by_sim[vetoed_by_sim['PnL'] > 0])
+                if sim_threshold > 50.0:
+                    st.caption(f"Strict threshold avoided **{saved_losses} losses** but missed **{missed_wins} wins**.")
+
+            # --- MFE TRAILING STOP AUDIT ---
+            with c2:
+                st.markdown("### 📈 Trailing Stop Audit (MFE)")
+                if 'Max_Profit_%' in df_j.columns:
+                    df_j['Max_Profit_%'] = pd.to_numeric(df_j['Max_Profit_%'], errors='coerce').fillna(0)
+                    wins_live = df_j[df_j['PnL'] > 0]
+                    losses_live = df_j[df_j['PnL'] <= 0]
+                    
+                    avg_mfe_wins = wins_live['Max_Profit_%'].mean() if not wins_live.empty else 0
+                    avg_mfe_losses = losses_live['Max_Profit_%'].mean() if not losses_live.empty else 0
+                    
                     st.metric("Avg Peak Profit on Losing Trades", f"+{avg_mfe_losses:.2f}%")
-                    st.caption("If this is > 3%, your trailing stop activates too late.")
-            else:
-                st.caption("MFE tracking active. Awaiting new closed trades.")
+                    st.caption("If this is > 3%, your trailing stop is activating too late.")
+                    st.metric("Avg Peak Profit on Winning Trades", f"+{avg_mfe_wins:.2f}%")
+                else:
+                    st.caption("MFE tracking active. Awaiting new closed trades.")
+        else:
+            st.info("Journal is empty. No live trades completed yet.")
 
-        with c2:
-            st.subheader("👻 Ghost Portfolio Preview")
-            st.info("Click 'Toggle Ghost Portfolio Tracker' above to fetch and analyze the latest vetoes from the database.")
-            
-    else:
-        st.info("Journal Empty. Close some trades to unlock the Threshold Optimizer.")
+    # ==========================================
+    # 3. AI VETO TRACKER
+    # ==========================================
+    with sub_tab3:
+        st.subheader("🛡️ AI Veto Tracker (AI_Veto_Log)")
+        st.markdown("Monitors setups that looked good technically but were rejected by the AI gatekeepers, proving how much capital the models saved you.")
+        
+        # Load the existing Ghost Dashboard logic which connects to AI_Veto_Log
+        try:
+            render_ghost_portfolio()
+        except Exception as e:
+            st.error(f"Error loading AI Veto Tracker: {e}")
