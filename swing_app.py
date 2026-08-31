@@ -754,7 +754,7 @@ with tab3:
             
     st.divider()
 
-    # 🟢 2. NEW: V3 INCUBATION AUDIT (Agentic Shadow Log)
+   # 🟢 2. NEW: V3 INCUBATION AUDIT (Agentic Shadow Log)
     st.subheader("🔬 V3 Incubation Audit (Paper / Shadow Trades)")
     st.markdown("Evaluating the mathematical edge of all T+8 paper trades to determine when V3 is ready for live capital.")
     
@@ -768,41 +768,62 @@ with tab3:
             df_shadow = df_shadow[~df_shadow['T8_Final_Outcome'].astype(str).str.contains("TBD")]
             
             if not df_shadow.empty:
+                # 1. Clean outcomes
                 df_shadow['Outcome_Num'] = pd.to_numeric(df_shadow['T8_Final_Outcome'], errors='coerce')
-                df_shadow['AI_Confidence'] = pd.to_numeric(
-                    df_shadow['AI_Confidence'] if 'AI_Confidence' in df_shadow.columns else df_shadow.get('Traditional_Score', 0), 
-                    errors='coerce'
-                ).fillna(0)
+                df_shadow = df_shadow.dropna(subset=['Outcome_Num'])
+                
+                # 2. Extract Confidence Series safely as a full Series
+                if 'AI_Confidence' in df_shadow.columns:
+                    conf_col = df_shadow['AI_Confidence']
+                elif 'Traditional_Score' in df_shadow.columns:
+                    conf_col = df_shadow['Traditional_Score']
+                elif 'Score' in df_shadow.columns:
+                    conf_col = df_shadow['Score']
+                else:
+                    conf_col = pd.Series(0, index=df_shadow.index)
+
+                df_shadow['AI_Confidence'] = pd.to_numeric(conf_col, errors='coerce').fillna(0)
                 
                 wins = df_shadow[df_shadow['Outcome_Num'] == 1]
                 losses = df_shadow[df_shadow['Outcome_Num'] == 0]
                 total_shadow = len(df_shadow)
                 shadow_win_rate = (len(wins) / total_shadow * 100) if total_shadow > 0 else 0
                 
-                # Assume a fixed 5% win and 3% loss strictly for estimating structural PF
-                gross_profit_est = len(wins) * 5
-                gross_loss_est = len(losses) * 3
-                shadow_pf = gross_profit_est / gross_loss_est if gross_loss_est > 0 else float('inf')
+                # Estimate gross returns assuming standard 5% win / 3% stop loss
+                gross_profit_est = len(wins) * 5.0
+                gross_loss_est = len(losses) * 3.0
+                shadow_pf = (gross_profit_est / gross_loss_est) if gross_loss_est > 0 else float('inf')
 
                 c_sa1, c_sa2, c_sa3 = st.columns(3)
                 c_sa1.metric("Closed Shadow Trades", f"{total_shadow}", "Target: 40-50")
                 c_sa2.metric("Shadow Win Rate", f"{shadow_win_rate:.1f}%", f"{len(wins)}W - {len(losses)}L")
-                c_sa3.metric("Est. Profit Factor", f"{shadow_pf:.2f}", "Target: > 1.30")
+                pf_display = f"{shadow_pf:.2f}" if shadow_pf != float('inf') else "∞"
+                c_sa3.metric("Est. Profit Factor", pf_display, "Target: > 1.30")
 
                 st.markdown("**AI Confidence vs. Win Rate (Shadow Log)**")
                 bins = [0, 55, 60, 65, 70, 100]
                 labels = ['< 55%', '55% - 60%', '60% - 65%', '65% - 70%', '70%+']
-                df_shadow['Confidence_Tier'] = pd.cut(df_shadow['AI_Confidence'], bins=bins, labels=labels)
+                df_shadow['Confidence_Tier'] = pd.cut(df_shadow['AI_Confidence'], bins=bins, labels=labels, include_lowest=True)
                 
-                tier_stats = df_shadow.groupby('Confidence_Tier').apply(
-                    lambda x: pd.Series({
-                        'Total Trades': len(x),
-                        'Win Rate %': (len(x[x['Outcome_Num'] == 1]) / len(x) * 100) if len(x) > 0 else 0,
+                # Resilient tier breakdown loop (avoids pandas version deprecation errors)
+                tier_rows = []
+                for label in labels:
+                    group = df_shadow[df_shadow['Confidence_Tier'] == label]
+                    group_total = len(group)
+                    group_wins = len(group[group['Outcome_Num'] == 1])
+                    group_wr = (group_wins / group_total * 100) if group_total > 0 else 0.0
+                    tier_rows.append({
+                        'Confidence Tier': label,
+                        'Total Trades': group_total,
+                        'Win Rate': f"{group_wr:.1f}%"
                     })
-                ).reset_index()
-                st.dataframe(tier_stats.style.format({'Win Rate %': '{:.1f}%'}), use_container_width=True)
+                
+                tier_df = pd.DataFrame(tier_rows)
+                st.dataframe(tier_df, use_container_width=True, hide_index=True)
             else:
                 st.info("Shadow log has no completed T+8 trades yet. Awaiting agent evaluations.")
+        else:
+            st.info("Shadow log is empty or missing 'T8_Final_Outcome' column.")
     except Exception as e:
         st.error(f"Could not load Shadow Log Audit: {e}")
 
