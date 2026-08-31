@@ -768,11 +768,13 @@ with tab3:
                         horizontal=True
                     )
                     
-                    # Filter dataset based on selection
-                    if "Nifty 50" in universe_filter:
+                    # Filter dataset based on EXACT string selection
+                    if universe_filter == "Nifty 50 (Streamlit Live)":
                         df_target = df_shadow[df_shadow['Clean_Symbol'].isin(NIFTY_50)]
+                        display_title = "Nifty 50 (Large Cap)"
                     else:
                         df_target = df_shadow[~df_shadow['Clean_Symbol'].isin(NIFTY_50)]
+                        display_title = "Nifty 500 (Broader Market)"
                     
                     if not df_target.empty:
                         wins = df_target[df_target['Outcome_Num'] == 1]
@@ -780,12 +782,11 @@ with tab3:
                         total_shadow = len(df_target)
                         shadow_win_rate = (len(wins) / total_shadow * 100) if total_shadow > 0 else 0
                         
-                        # Assuming standard +5% win and -3% loss strictly for Est PF
                         gross_profit_est = len(wins) * 5.0
                         gross_loss_est = len(losses) * 3.0
                         shadow_pf = (gross_profit_est / gross_loss_est) if gross_loss_est > 0 else float('inf')
 
-                        st.markdown(f"### {universe_filter.split(' ')[0]} Performance Overview")
+                        st.markdown(f"### {display_title} Performance Overview")
                         c_sa1, c_sa2, c_sa3 = st.columns(3)
                         c_sa1.metric("Closed Shadow Trades", f"{total_shadow}")
                         c_sa2.metric("Win Rate", f"{shadow_win_rate:.1f}%", f"{len(wins)}W - {len(losses)}L")
