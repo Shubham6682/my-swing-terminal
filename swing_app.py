@@ -758,7 +758,8 @@ with tab3:
                     # Ensure Confidence is a series
                     conf_col = df_shadow.get('AI_Confidence', df_shadow.get('Traditional_Score', pd.Series(0, index=df_shadow.index)))
                     df_shadow['AI_Confidence'] = pd.to_numeric(conf_col, errors='coerce').fillna(0)
-                    df_shadow['Clean_Symbol'] = df_shadow['Symbol'].astype(str).str.replace('.NS', '', regex=False)
+                    ticker_col = 'Ticker' if 'Ticker' in df_shadow.columns else 'Symbol'
+                    df_shadow['Clean_Symbol'] = df_shadow[ticker_col].astype(str).str.replace('.NS', '', regex=False)
 
                     # Universe Splitter Toggle
                     universe_filter = st.radio(
