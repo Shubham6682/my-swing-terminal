@@ -720,8 +720,8 @@ with tab2:
 
 # --- TAB 3: AI CALIBRATION DECK ---
 with tab3:
-    st.header("🧠 AI Calibration Deck")
-    st.markdown("Analyze your model's accuracy, simulate strictness thresholds, and track vetoed setups.")
+    st.header("🧠 AI Calibration & Quant Audit")
+    st.markdown("Analyze model accuracy, audit shadow performance, and track vetoed setups.")
 
     if st.button("🔄 Force Reload DBs"):
         st.cache_resource.clear()
@@ -729,11 +729,10 @@ with tab3:
         st.rerun()
     st.divider()
 
-    # Load both the live Journal and the Ghost Portfolio
+    # Load the live Journal for existing modules
     df_j = pd.DataFrame(st.session_state.journal) if st.session_state.journal else pd.DataFrame()
     
-
-    # 🟢 1. INDEPENDENT MODULES (These now show regardless of the Journal)
+    # 🟢 1. EXISTING INDEPENDENT MODULES
     if 'show_ghost' not in st.session_state: st.session_state.show_ghost = False
     if 'show_audit' not in st.session_state: st.session_state.show_audit = False
 
@@ -741,7 +740,7 @@ with tab3:
     if c_btn1.button("👻 Toggle Ghost Portfolio Tracker", use_container_width=True):
         st.session_state.show_ghost = not st.session_state.show_ghost
         
-    if c_btn2.button("📊 Toggle Deep Performance Audit", use_container_width=True):
+    if c_btn2.button("📊 Toggle Legacy Performance Audit", use_container_width=True):
         st.session_state.show_audit = not st.session_state.show_audit
 
     if st.session_state.show_ghost:
@@ -751,27 +750,80 @@ with tab3:
         if not df_j.empty and 'PnL' in df_j.columns:
             run_advanced_audit(df_j)
         else:
-            st.warning("Not enough closed trades in the Journal to run the Deep Audit.")
+            st.warning("Not enough closed trades in the Journal to run the Legacy Audit.")
             
     st.divider()
 
-    # 🟢 2. THE CALIBRATOR (This still requires closed Journal trades)
+    # 🟢 2. NEW: V3 INCUBATION AUDIT (Agentic Shadow Log)
+    st.subheader("🔬 V3 Incubation Audit (Paper / Shadow Trades)")
+    st.markdown("Evaluating the mathematical edge of all T+8 paper trades to determine when V3 is ready for live capital.")
+    
+    try:
+        # Securely fetch the Shadow Log using your existing database.py function
+        shadow_data = fetch_sheet_data("Agentic_Shadow_Log")
+        df_shadow = pd.DataFrame(shadow_data)
+        
+        if not df_shadow.empty and 'T8_Final_Outcome' in df_shadow.columns:
+            # Filter out pending trades
+            df_shadow = df_shadow[~df_shadow['T8_Final_Outcome'].astype(str).str.contains("TBD")]
+            
+            if not df_shadow.empty:
+                df_shadow['Outcome_Num'] = pd.to_numeric(df_shadow['T8_Final_Outcome'], errors='coerce')
+                df_shadow['AI_Confidence'] = pd.to_numeric(
+                    df_shadow['AI_Confidence'] if 'AI_Confidence' in df_shadow.columns else df_shadow.get('Traditional_Score', 0), 
+                    errors='coerce'
+                ).fillna(0)
+                
+                wins = df_shadow[df_shadow['Outcome_Num'] == 1]
+                losses = df_shadow[df_shadow['Outcome_Num'] == 0]
+                total_shadow = len(df_shadow)
+                shadow_win_rate = (len(wins) / total_shadow * 100) if total_shadow > 0 else 0
+                
+                # Assume a fixed 5% win and 3% loss strictly for estimating structural PF
+                gross_profit_est = len(wins) * 5
+                gross_loss_est = len(losses) * 3
+                shadow_pf = gross_profit_est / gross_loss_est if gross_loss_est > 0 else float('inf')
+
+                c_sa1, c_sa2, c_sa3 = st.columns(3)
+                c_sa1.metric("Closed Shadow Trades", f"{total_shadow}", "Target: 40-50")
+                c_sa2.metric("Shadow Win Rate", f"{shadow_win_rate:.1f}%", f"{len(wins)}W - {len(losses)}L")
+                c_sa3.metric("Est. Profit Factor", f"{shadow_pf:.2f}", "Target: > 1.30")
+
+                st.markdown("**AI Confidence vs. Win Rate (Shadow Log)**")
+                bins = [0, 55, 60, 65, 70, 100]
+                labels = ['< 55%', '55% - 60%', '60% - 65%', '65% - 70%', '70%+']
+                df_shadow['Confidence_Tier'] = pd.cut(df_shadow['AI_Confidence'], bins=bins, labels=labels)
+                
+                tier_stats = df_shadow.groupby('Confidence_Tier').apply(
+                    lambda x: pd.Series({
+                        'Total Trades': len(x),
+                        'Win Rate %': (len(x[x['Outcome_Num'] == 1]) / len(x) * 100) if len(x) > 0 else 0,
+                    })
+                ).reset_index()
+                st.dataframe(tier_stats.style.format({'Win Rate %': '{:.1f}%'}), use_container_width=True)
+            else:
+                st.info("Shadow log has no completed T+8 trades yet. Awaiting agent evaluations.")
+    except Exception as e:
+        st.error(f"Could not load Shadow Log Audit: {e}")
+
+    st.divider()
+
+    # 🟢 3. EXISTING: THE THRESHOLD OPTIMIZER (Live Journal)
     if not df_j.empty and 'PnL' in df_j.columns:
-        # Clean the PnL data
         df_j['PnL'] = df_j['PnL'].astype(str).str.replace(r'[₹,a-zA-Z\s]', '', regex=True)
         df_j['PnL'] = pd.to_numeric(df_j['PnL'], errors='coerce').fillna(0)
         
-        # Ensure AI Confidence exists for older trades
         if 'AI_Confidence' not in df_j.columns: df_j['AI_Confidence'] = 70.0
         df_j['AI_Confidence'] = pd.to_numeric(df_j['AI_Confidence'], errors='coerce').fillna(70.0)
 
         c1, c2 = st.columns([2, 1])
 
         with c1:
-            st.subheader("🎛️ The Threshold Optimizer")
+            st.subheader("🎛️ Live Threshold Optimizer")
             st.caption("Simulate how stricter AI standards would have impacted your historical execution.")
             
-            sim_threshold = st.slider("Minimum AI Confidence Threshold (%)", min_value=70.0, max_value=99.0, value=70.0, step=1.0)
+            # Lowered the minimum to 50% to accommodate the V3 Challenger logic
+            sim_threshold = st.slider("Minimum AI Confidence Threshold (%)", min_value=50.0, max_value=99.0, value=70.0, step=1.0)
             
             sim_trades = df_j[df_j['AI_Confidence'] >= sim_threshold]
             vetoed_by_sim = df_j[df_j['AI_Confidence'] < sim_threshold]
@@ -789,15 +841,35 @@ with tab3:
             k2.metric("Simulated Win Rate", f"{sim_rate:.1f}%")
             k3.metric("Simulated Trades", sim_total)
             
-            if sim_threshold > 70.0:
+            if sim_threshold > 50.0:
                 st.info(f"💡 **Simulation Result:** By raising your threshold to {sim_threshold}%, you would have avoided **{saved_losses} losing trades**, but missed out on **{missed_wins} winning trades**.")
             
             st.markdown("#### Confidence vs. PnL Distribution")
             st.scatter_chart(sim_trades, x="AI_Confidence", y="PnL")
 
+            # 🟢 NEW: MFE AUDIT (Maximum Favorable Excursion) injected here
+            st.subheader("📈 Live Risk Management & Trailing Stop Efficiency")
+            if 'Max_Profit_%' in df_j.columns:
+                df_j['Max_Profit_%'] = pd.to_numeric(df_j['Max_Profit_%'], errors='coerce').fillna(0)
+                wins_live = df_j[df_j['PnL'] > 0]
+                losses_live = df_j[df_j['PnL'] <= 0]
+                
+                avg_mfe_wins = wins_live['Max_Profit_%'].mean() if not wins_live.empty else 0
+                avg_mfe_losses = losses_live['Max_Profit_%'].mean() if not losses_live.empty else 0
+                
+                col_m1, col_m2 = st.columns(2)
+                with col_m1:
+                    st.metric("Avg Peak Profit on Winning Trades", f"+{avg_mfe_wins:.2f}%")
+                    st.caption("Shows how closely your trailing stop locks in the peak.")
+                with col_m2:
+                    st.metric("Avg Peak Profit on Losing Trades", f"+{avg_mfe_losses:.2f}%")
+                    st.caption("If this is > 3%, your trailing stop activates too late.")
+            else:
+                st.caption("MFE tracking active. Awaiting new closed trades.")
+
         with c2:
             st.subheader("👻 Ghost Portfolio Preview")
-            st.info("Click 'Toggle Ghost Portfolio Tracker' below to fetch and analyze the latest vetoes from the database.")
+            st.info("Click 'Toggle Ghost Portfolio Tracker' above to fetch and analyze the latest vetoes from the database.")
             
     else:
         st.info("Journal Empty. Close some trades to unlock the Threshold Optimizer.")
