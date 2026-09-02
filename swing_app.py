@@ -725,7 +725,10 @@ with tab3:
 
     if st.button("🔄 Force Reload Database"):
         st.cache_resource.clear()
+        st.cache_data.clear()
+        # 🟢 Force a fresh pull for all databases and save to RAM
         st.session_state.journal = fetch_sheet_data("Journal")
+        st.session_state.shadow_log_data = fetch_sheet_data("Agentic_Shadow_Log")
         st.rerun()
     st.divider()
 
