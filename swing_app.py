@@ -36,7 +36,12 @@ if is_market_active:
 else:
     st.info("🌙 Market is Closed. Auto-refresh is paused to save resources.")
 
-if 'db_connected' not in st.session_state: st.session_state.db_connected = False
+# 🟢 AUTO-CONNECT: Initializes DB connection immediately on app startup
+if 'db_connected' not in st.session_state:
+    try:
+        st.session_state.db_connected = init_google_sheet()
+    except Exception:
+        st.session_state.db_connected = False
 
 # --- 3. SESSION STATE ---
 if 'portfolio' not in st.session_state: st.session_state.portfolio = fetch_sheet_data("Portfolio")
@@ -429,62 +434,48 @@ with tab1:
                 })
                 
                 is_afternoon = datetime.time(13, 30) <= now.time() < datetime.time(15, 30)
-                
-                # 🟢 REFACTORED CONDITION: We now let ALL raw technical triggers through so the Agent can evaluate Phantom Trades.
-                if bot_active and is_afternoon and raw_technical_trigger:
-                    current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
-                    if symbol not in current_holdings and symbol not in st.session_state.blacklist:
+
+                # 🟢 1. GLOBAL AI EVALUATION (Runs for both shadow logging AND live buying)
+                final_approval = False
+                strategy_tag = "Legacy"
+                v2_confidence, v3_confidence = 0.0, 0.0
+
+                if raw_technical_trigger:
+                    c_trap_score = round((c_rvol * c_wick_reject) / (1 + abs(c_sma20_dist)), 2)
+                    c_mom_vel = round(c_rsi * c_rvol, 2)
+
+                    stock_data_for_ai = {
+                        'RVol': c_rvol, 'RSI': c_rsi, 'SMA200_Dist': c_dist,
+                        'SMA20_Dist': c_sma20_dist, 'Wick_Reject': c_wick_reject,
+                        'Trap_Score': c_trap_score, 'Momentum_Velocity': c_mom_vel
+                    }
+                    macro_data_for_ai = {'VIX': c_vix, 'Nifty_Trend': n_trend, 'Nifty_5D': c_nifty_5d}
+
+                    v2_approved, v2_confidence = ask_ai_gatekeeper(ai_model, stock_data_for_ai, macro_data_for_ai)
+                    v3_approved, v3_confidence = ask_v3_challenger(v3_model, stock_data_for_ai, macro_data_for_ai)
+
+                    final_approval = v2_approved or v3_approved
+                    if v2_approved and v3_approved: strategy_tag = "V2_V3_Agreement"
+                    elif v2_approved: strategy_tag = "V2_Only"
+                    elif v3_approved: strategy_tag = "V3_Only"
+
+                # 🟢 2. DECOUPLED SHADOW LOGGING (Only runs in afternoon, ignores bot_active)
+                if is_afternoon and raw_technical_trigger:
+                    if symbol not in [x['Symbol'] for x in st.session_state.portfolio] and symbol not in st.session_state.blacklist:
                         
-                        # 1. Calculate the AI variables
-                        c_trap_score = round((c_rvol * c_wick_reject) / (1 + abs(c_sma20_dist)), 2)
-                        c_mom_vel = round(c_rsi * c_rvol, 2)
-
-                        stock_data_for_ai = {
-                            'RVol': c_rvol, 'RSI': c_rsi, 'SMA200_Dist': c_dist,
-                            'SMA20_Dist': c_sma20_dist, 'Wick_Reject': c_wick_reject,
-                            'Trap_Score': c_trap_score, 'Momentum_Velocity': c_mom_vel
-                        }
-                        # 🟢 ADDED NIFTY_5D FOR V3
-                        macro_data_for_ai = {'VIX': c_vix, 'Nifty_Trend': n_trend, 'Nifty_5D': c_nifty_5d}
-
-                        # 2. Get the V2 Confidence Score (The Champion)
-                        v2_approved, v2_confidence = ask_ai_gatekeeper(ai_model, stock_data_for_ai, macro_data_for_ai)
-                        
-                        # 3. Get the V3 Confidence Score (The Challenger)
-                        v3_approved, v3_confidence = ask_v3_challenger(v3_model, stock_data_for_ai, macro_data_for_ai)
-
-                        # 🟢 4. THE DUAL-CORE DECISION MATRIX
-                        final_approval = False
-                        strategy_tag = ""
-                        
-                        if v2_approved and v3_approved:
-                            final_approval = True
-                            strategy_tag = "V2_V3_Agreement"
-                        elif v2_approved and not v3_approved:
-                            final_approval = True
-                            strategy_tag = "V2_Only"
-                        elif v3_approved and not v2_approved:
-                            final_approval = True
-                            strategy_tag = "V3_Only"
-
-                        # 5. 🟢 FIRE THE AGENTIC INTERCEPTOR
+                        # Agentic Interceptor
                         if symbol not in st.session_state.shadow_logged_today:
                             try:
                                 evaluate_and_log_shadow_trade(
-                                    ticker=symbol,
-                                    entry_price=curr_price,
-                                    traditional_score=v2_confidence, # Using V2 as the baseline shadow reference
-                                    live_vix=c_vix,
-                                    nifty_intraday_pct=n_trend,
-                                    is_market_halted=not is_safe_to_buy, 
+                                    ticker=symbol, entry_price=curr_price, traditional_score=v2_confidence, 
+                                    live_vix=c_vix, nifty_intraday_pct=n_trend, is_market_halted=not is_safe_to_buy, 
                                     sheet_id=st.secrets["gcp_service_account"]["sheet_id"] 
                                 )
                                 st.session_state.shadow_logged_today.append(symbol)
-                                time.sleep(5) 
-                            except Exception as e:
-                                print(f"Shadow logger bypassed for {symbol}: {e}")
+                                time.sleep(2) 
+                            except Exception as e: print(f"Shadow error: {e}")
 
-                        # 6. 👁️ FIRE THE VISIONARY AI 
+                        # Vision AI Logger
                         if symbol not in st.session_state.vision_logged_today:
                             try:
                                 ticker_df = pd.DataFrame({'Close': closes[ticker], 'High': highs[ticker]}).dropna().tail(125) 
@@ -492,53 +483,50 @@ with tab1:
                                     evaluate_and_log_vision_trade(symbol, ticker_df)
                                     st.session_state.vision_logged_today.append(symbol)
                                     time.sleep(1.5)
-                            except Exception as e:
-                                print(f"Vision shadow logger bypassed for {symbol}: {e}")
+                            except Exception as e: print(f"Vision error: {e}")
 
-                       # 7. THE REAL PORTFOLIO TRADER
-                        if status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
-                            if final_approval:
-                                
-                                capital_per_trade = 10000 
-                                
-                                # 🟢 NEW: If price > 10k, buy 1 share. Otherwise, allocate 10k evenly.
-                                if curr_price > capital_per_trade:
-                                    calculated_qty = 1
-                                else:
-                                    calculated_qty = int(capital_per_trade / curr_price)
+                # 🟢 3. REAL PORTFOLIO TRADER (Runs ALL day, strictly requires bot_active)
+                if bot_active and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
+                    current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
+                    
+                    if symbol not in current_holdings and symbol not in st.session_state.blacklist:
+                        if final_approval:
+                            capital_per_trade = 10000 
+                            calculated_qty = 1 if curr_price > capital_per_trade else int(capital_per_trade / curr_price)
 
-                                new_trade = {
-                                    "Date": now.strftime("%Y-%m-%d"), "EntryTime": now.strftime("%H:%M:%S"),
-                                    "Symbol": symbol, "Ticker": ticker, 
-                                    "Qty": calculated_qty, 
-                                    "BuyPrice": curr_price,
-                                    "StopPrice": curr_price * (1 - (risk_per_trade/100)), 
-                                    "Strategy": strategy_tag, 
+                            new_trade = {
+                                "Date": now.strftime("%Y-%m-%d"), "EntryTime": now.strftime("%H:%M:%S"),
+                                "Symbol": symbol, "Ticker": ticker, 
+                                "Qty": calculated_qty, 
+                                "BuyPrice": curr_price,
+                                "StopPrice": curr_price * (1 - (risk_per_trade/100)), 
+                                "Strategy": strategy_tag, 
+                                "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
+                                "RSI": c_rsi, "SMA200_Dist": c_dist,
+                                "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
+                                "Trap_Score": round((c_rvol * c_wick_reject) / (1 + abs(c_sma20_dist)), 2), 
+                                "Momentum_Velocity": round(c_rsi * c_rvol, 2), 
+                                "AI_Confidence": max(v2_confidence, v3_confidence),
+                                "Max_Profit_%": 0.0, "Max_Drawdown_%": 0.0
+                            }
+                            st.session_state.portfolio.append(new_trade)
+                            new_trades_added = True
+                            st.session_state.notifications.append(f"🟢 {now.strftime('%H:%M')} - {strategy_tag}: Bought {calculated_qty}x {symbol}")
+                            st.toast(f"🤖 Bot Bought: {calculated_qty} shares of {symbol}")
+                        else:
+                            if symbol not in st.session_state.vetoed_today:
+                                st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - BOTH AI VETOED: {symbol}")
+                                vetoed_setup = {
+                                    "Date": now.strftime("%Y-%m-%d"), "Time": now.strftime("%H:%M:%S"),
+                                    "Symbol": symbol, "Price": curr_price, "AI_Confidence": v2_confidence,
                                     "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
-                                    "RSI": c_rsi, "SMA200_Dist": c_dist,
-                                    "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
-                                    "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel, 
-                                    "AI_Confidence": max(v2_confidence, v3_confidence),
-                                    "Max_Profit_%": 0.0, "Max_Drawdown_%": 0.0
+                                    "RSI": c_rsi, "SMA200_Dist": c_dist, "SMA20_Dist": c_sma20_dist, 
+                                    "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
+                                    "Trap_Score": round((c_rvol * c_wick_reject) / (1 + abs(c_sma20_dist)), 2), 
+                                    "Momentum_Velocity": round(c_rsi * c_rvol, 2)
                                 }
-                                st.session_state.portfolio.append(new_trade)
-                                new_trades_added = True
-                                st.session_state.notifications.append(f"🟢 {now.strftime('%H:%M')} - {strategy_tag}: Bought {calculated_qty}x {symbol}")
-                                st.toast(f"🤖 Bot Bought: {calculated_qty} shares of {symbol}")
-                            else:
-                                # Both V2 and V3 completely rejected it
-                                if symbol not in st.session_state.vetoed_today:
-                                    st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - BOTH AI VETOED: {symbol}")
-                                    vetoed_setup = {
-                                        "Date": now.strftime("%Y-%m-%d"), "Time": now.strftime("%H:%M:%S"),
-                                        "Symbol": symbol, "Price": curr_price, "AI_Confidence": v2_confidence,
-                                        "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
-                                        "RSI": c_rsi, "SMA200_Dist": c_dist,
-                                        "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
-                                        "Trap_Score": c_trap_score, "Momentum_Velocity": c_mom_vel
-                                    }
-                                    log_ai_veto(vetoed_setup)
-                                    st.session_state.vetoed_today.append(symbol)
+                                log_ai_veto(vetoed_setup)
+                                st.session_state.vetoed_today.append(symbol)
             except: continue
 
         if scan_results:
