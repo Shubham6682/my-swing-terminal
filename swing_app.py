@@ -518,7 +518,7 @@ with tab1:
                                 st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - BOTH AI VETOED: {symbol}")
                                 vetoed_setup = {
                                     "Date": now.strftime("%Y-%m-%d"), "Time": now.strftime("%H:%M:%S"),
-                                    "Symbol": symbol, "Price": curr_price, "AI_Confidence": v2_confidence,
+                                    "Symbol": symbol, "Price": curr_price, "AI_Confidence": max(v2_confidence, v3_confidence),
                                     "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
                                     "RSI": c_rsi, "SMA200_Dist": c_dist, "SMA20_Dist": c_sma20_dist, 
                                     "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
@@ -735,8 +735,11 @@ with tab3:
         st.caption("Evaluating the mathematical edge of T+8 paper trades from the Agentic_Shadow_Log.")
         
         try:
-            shadow_data = fetch_sheet_data("Agentic_Shadow_Log")
-            df_shadow = pd.DataFrame(shadow_data)
+            # 🟢 Check if data is already in RAM. If not, fetch it ONCE.
+            if 'shadow_log_data' not in st.session_state:
+                st.session_state.shadow_log_data = fetch_sheet_data("Agentic_Shadow_Log")
+                
+            df_shadow = pd.DataFrame(st.session_state.shadow_log_data)
             
             if not df_shadow.empty and 'T8_Final_Outcome' in df_shadow.columns:
                 df_shadow = df_shadow[~df_shadow['T8_Final_Outcome'].astype(str).str.contains("TBD")]
