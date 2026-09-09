@@ -923,6 +923,12 @@ with tab3:
         
         # Load datasets from RAM
         df_j_score = pd.DataFrame(st.session_state.journal) if st.session_state.journal else pd.DataFrame()
+        
+        # 🟢 NEW: Purge manual/legacy trades. Only evaluate setups with actual AI Confidence scores.
+        if not df_j_score.empty and 'AI_Confidence' in df_j_score.columns:
+            df_j_score['AI_Confidence'] = pd.to_numeric(df_j_score['AI_Confidence'], errors='coerce').fillna(0)
+            df_j_score = df_j_score[df_j_score['AI_Confidence'] > 0]
+
         shadow_mem = st.session_state.get('shadow_log_data', [])
         df_s_score = pd.DataFrame(shadow_mem) if shadow_mem else pd.DataFrame()
 
