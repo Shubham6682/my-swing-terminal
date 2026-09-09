@@ -720,11 +720,12 @@ with tab3:
         st.rerun()
     st.divider()
 
-    # Create three distinct sub-tabs aligning with your 3 Google Sheets
-    sub_tab1, sub_tab2, sub_tab3 = st.tabs([
+    # Create distinct sub-tabs aligning with your databases and master analytics
+    sub_tab1, sub_tab2, sub_tab3, sub_tab4 = st.tabs([
         "🕵️ Agentic Shadow Analyzer (Incubation)", 
         "📓 Journal Analyzer (Live Capital)", 
-        "🛡️ AI Veto Tracker (Capital Saved)"
+        "🛡️ AI Veto Tracker (Capital Saved)",
+        "🔬 Institutional Edge Scorecard"
     ])
 
     # ==========================================
@@ -912,3 +913,113 @@ with tab3:
             render_ghost_portfolio()
         except Exception as e:
             st.error(f"Error loading AI Veto Tracker: {e}")
+
+    # ==========================================
+    # 4. INSTITUTIONAL EDGE SCORECARD
+    # ==========================================
+    with sub_tab4:
+        st.subheader("🔬 Institutional Edge Scorecard")
+        st.markdown("Automated quantitative audit to prove mathematical edge, AI calibration, and execution efficiency.")
+        
+        # Load datasets from RAM
+        df_j_score = pd.DataFrame(st.session_state.journal) if st.session_state.journal else pd.DataFrame()
+        shadow_mem = st.session_state.get('shadow_log_data', [])
+        df_s_score = pd.DataFrame(shadow_mem) if shadow_mem else pd.DataFrame()
+
+        c1, c2 = st.columns(2)
+        
+        # --- 1. EXPECTANCY ENGINE ---
+        with c1:
+            st.markdown("### Step 1: Mathematical Expectancy ($E$)")
+            st.latex(r"E = (W \times R) - (1 - W)")
+            
+            # Prefer Live Journal Data, fallback to Shadow Log
+            eval_df = df_j_score if not df_j_score.empty and 'PnL' in df_j_score.columns else df_s_score
+            is_live = not df_j_score.empty and 'PnL' in df_j_score.columns
+
+            if not eval_df.empty:
+                if is_live:
+                    # Live Expectancy Math
+                    eval_df['PnL'] = pd.to_numeric(eval_df['PnL'].astype(str).str.replace(r'[₹,a-zA-Z\s]', '', regex=True), errors='coerce').fillna(0)
+                    wins = eval_df[eval_df['PnL'] > 0]
+                    losses = eval_df[eval_df['PnL'] <= 0]
+                    
+                    W = len(wins) / len(eval_df) if len(eval_df) > 0 else 0
+                    avg_win = wins['PnL'].mean() if not wins.empty else 0
+                    avg_loss = abs(losses['PnL'].mean()) if not losses.empty else 0
+                    R = (avg_win / avg_loss) if avg_loss > 0 else 0
+                else:
+                    # Shadow Expectancy Math (using fixed 5% and 3%)
+                    if 'T8_Final_Outcome' in eval_df.columns:
+                        eval_df = eval_df[~eval_df['T8_Final_Outcome'].astype(str).str.contains("TBD")]
+                        eval_df['Outcome_Num'] = pd.to_numeric(eval_df['T8_Final_Outcome'], errors='coerce')
+                        eval_df = eval_df.dropna(subset=['Outcome_Num'])
+                        
+                        wins = eval_df[eval_df['Outcome_Num'] == 1]
+                        W = len(wins) / len(eval_df) if len(eval_df) > 0 else 0
+                        R = 5.0 / 3.0 # Hardcoded shadow targets
+            
+                E = (W * R) - (1 - W) if len(eval_df) > 0 else 0
+
+                s_c1, s_c2, s_c3 = st.columns(3)
+                s_c1.metric("Win Rate ($W$)", f"{W*100:.1f}%")
+                s_c2.metric("Payoff Ratio ($R$)", f"{R:.2f}")
+                s_c3.metric("Expectancy ($E$)", f"{E:.2f}", "Edge Confirmed" if E > 0.20 else "No Edge", delta_color="normal")
+                
+                source_txt = "Live Capital (Journal)" if is_live else "Paper (Shadow Log)"
+                st.caption(f"Based on {len(eval_df)} completed trades from **{source_txt}**.")
+            else:
+                st.info("Insufficient data to calculate mathematical expectancy.")
+
+        # --- 2. THE REVERSAL TRAP (MFE) ---
+        with c2:
+            st.markdown("### Step 4: The Reversal Trap Audit")
+            if not df_j_score.empty and 'Max_Profit_%' in df_j_score.columns and 'PnL' in df_j_score.columns:
+                df_j_score['PnL'] = pd.to_numeric(df_j_score['PnL'].astype(str).str.replace(r'[₹,a-zA-Z\s]', '', regex=True), errors='coerce').fillna(0)
+                df_j_score['Max_Profit_%'] = pd.to_numeric(df_j_score['Max_Profit_%'], errors='coerce').fillna(0)
+                
+                real_losses = df_j_score[df_j_score['PnL'] <= 0]
+                if not real_losses.empty:
+                    trap_trades = real_losses[real_losses['Max_Profit_%'] >= 3.0]
+                    trap_pct = (len(trap_trades) / len(real_losses)) * 100
+                    avg_trap_peak = trap_trades['Max_Profit_%'].mean() if not trap_trades.empty else 0
+                    
+                    st.metric("Losing Trades that peaked > +3.0%", f"{trap_pct:.1f}%", f"{len(trap_trades)} out of {len(real_losses)} losses", delta_color="inverse")
+                    if trap_pct > 30.0:
+                        st.error(f"⚠️ **Reversal Trap Detected:** {trap_pct:.1f}% of your losses were actually up an average of +{avg_trap_peak:.2f}% before stopping out. You must tighten your trailing stop trigger to +3.5%.")
+                    else:
+                        st.success("✅ **Efficient Exits:** Your losing trades rarely hit deep profit before reversing.")
+                else:
+                    st.caption("No losing trades to audit yet.")
+            else:
+                st.caption("Waiting for Journal data to calculate MFE Reversal Traps.")
+
+        st.divider()
+
+        # --- 3. AI CALIBRATION & MONOTONICITY ---
+        st.markdown("### Step 2 & 3: AI Monotonicity & Veto Counterfactual")
+        if not df_s_score.empty and 'T8_Final_Outcome' in df_s_score.columns:
+            # Re-clean for the chart
+            df_s_score = df_s_score[~df_s_score['T8_Final_Outcome'].astype(str).str.contains("TBD")]
+            df_s_score['Outcome_Num'] = pd.to_numeric(df_s_score['T8_Final_Outcome'], errors='coerce')
+            df_s_score = df_s_score.dropna(subset=['Outcome_Num'])
+            conf_col = df_s_score.get('AI_Confidence', df_s_score.get('Traditional_Score', pd.Series(0, index=df_s_score.index)))
+            df_s_score['AI_Confidence'] = pd.to_numeric(conf_col, errors='coerce').fillna(0)
+
+            bins = [0, 50, 55, 60, 65, 70, 100]
+            labels = ['Veto Zone (<50%)', '50-55%', '55-60%', '60-65%', '65-70%', 'High Conviction (70%+)']
+            df_s_score['Calibration_Tier'] = pd.cut(df_s_score['AI_Confidence'], bins=bins, labels=labels, include_lowest=True)
+            
+            calib_data = []
+            for label in labels:
+                group = df_s_score[df_s_score['Calibration_Tier'] == label]
+                if len(group) > 0:
+                    wr = (len(group[group['Outcome_Num'] == 1]) / len(group)) * 100
+                    calib_data.append({"Confidence Tier": label, "Win Rate (%)": wr, "Sample Size": len(group)})
+            
+            if calib_data:
+                chart_df = pd.DataFrame(calib_data).set_index("Confidence Tier")
+                st.bar_chart(chart_df["Win Rate (%)"], color="#28a745")
+                st.caption("If this chart slopes steadily upward from left to right, your XGBoost logic is perfectly calibrated. The 'Veto Zone' bar answers your **Step 3 Veto Counterfactual**: If it is high, your AI is too strict. If it is low, the AI is saving you money.")
+            else:
+                st.caption("Insufficient shadow data for calibration charting.")
