@@ -924,10 +924,26 @@ with tab3:
         # Load datasets from RAM
         df_j_score = pd.DataFrame(st.session_state.journal) if st.session_state.journal else pd.DataFrame()
         
-        # 🟢 NEW: Purge manual/legacy trades. Only evaluate setups with actual AI Confidence scores.
+        # 🟢 Purge manual/legacy trades. Only evaluate setups with actual AI Confidence scores.
         if not df_j_score.empty and 'AI_Confidence' in df_j_score.columns:
             df_j_score['AI_Confidence'] = pd.to_numeric(df_j_score['AI_Confidence'], errors='coerce').fillna(0)
             df_j_score = df_j_score[df_j_score['AI_Confidence'] > 0]
+            
+            # 🟢 NEW: Strategy Isolation Filter
+            st.markdown("**Filter by AI Brain**")
+            strategy_filter = st.radio(
+                "Isolate Model Performance:", 
+                ["All AI Trades", "V3 Approved Only (V3_Only & Agreement)", "V2 Approved Only (V2_Only & Agreement)"],
+                horizontal=True,
+                label_visibility="collapsed"
+            )
+            st.divider()
+            
+            # Apply the mathematical filter
+            if "V3" in strategy_filter:
+                df_j_score = df_j_score[df_j_score['Strategy'].astype(str).str.contains('V3', na=False)]
+            elif "V2" in strategy_filter:
+                df_j_score = df_j_score[df_j_score['Strategy'].astype(str).str.contains('V2', na=False)]
 
         shadow_mem = st.session_state.get('shadow_log_data', [])
         df_s_score = pd.DataFrame(shadow_mem) if shadow_mem else pd.DataFrame()
