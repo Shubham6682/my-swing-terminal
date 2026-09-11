@@ -433,7 +433,7 @@ with tab1:
                     "Gap %": f"{gap_pct:.1f}%"
                 })
                 
-                is_afternoon = datetime.time(13, 30) <= now.time() < datetime.time(15, 30)
+                is_afternoon = datetime.time(9, 15) <= now.time() < datetime.time(15, 30)
 
                 # 🟢 1. GLOBAL AI EVALUATION (Runs for both shadow logging AND live buying)
                 final_approval = False
