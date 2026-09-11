@@ -467,7 +467,7 @@ with tab1:
                         if symbol not in st.session_state.shadow_logged_today:
                             try:
                                 evaluate_and_log_shadow_trade(
-                                    ticker=symbol, entry_price=curr_price, traditional_score=v2_confidence, 
+                                    ticker=symbol, entry_price=curr_price, traditional_score=max(v2_confidence, v3_confidence), 
                                     live_vix=c_vix, nifty_intraday_pct=n_trend, is_market_halted=not is_safe_to_buy, 
                                     sheet_id=st.secrets["gcp_service_account"]["sheet_id"] 
                                 )
