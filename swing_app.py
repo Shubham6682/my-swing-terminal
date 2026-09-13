@@ -10,7 +10,7 @@ from analysis import run_advanced_audit
 from ghost_dashboard import render_ghost_portfolio  
 
 # 🟢 THE MODULAR IMPORTS (Updated to include V3)
-from ai_core import load_ai_brain, ask_ai_gatekeeper, load_v3_brain, ask_v3_challenger
+from ai_core import load_v3_brain, ask_v3_challenger
 from indicators import calculate_rsi, calculate_bollinger_width
 from database import init_google_sheet, fetch_sheet_data, save_portfolio_cloud, log_trade_journal, log_ai_veto, log_signal_cloud, load_signals_from_cloud, sync_ghost_labels_to_cloud
 from agent_interceptor import evaluate_and_log_shadow_trade, auto_grade_shadow_log, fetch_todays_shadow_log
@@ -23,8 +23,7 @@ ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 today_str = now.strftime("%Y-%m-%d")
 
-# 🟢 LOAD BOTH BRAINS INTO MEMORY
-ai_model = load_ai_brain()
+# 🟢 LOAD V3 BRAIN INTO MEMORY
 v3_model = load_v3_brain()
 
 market_open = datetime.time(9, 15)
@@ -306,11 +305,9 @@ with tab1:
                             # 🟢 Added Nifty_5D to macro payload
                             macro_data_for_ai = {'VIX': c_vix, 'Nifty_Trend': n_trend, 'Nifty_5D': c_nifty_5d}
                             
-                            # Get the AI Verdicts from BOTH Brains
-                            v2_approved, v2_confidence = ask_ai_gatekeeper(ai_model, stock_data_for_ai, macro_data_for_ai)
+                            # Get the AI Verdict from V3 Brain
                             v3_approved, v3_confidence = ask_v3_challenger(v3_model, stock_data_for_ai, macro_data_for_ai)
-                            
-                            final_approval = v2_approved or v3_approved
+                            final_approval = v3_approved
                             
                             # --- UI UPDATES BASED ON AI ---
                             if c_status in ["🎯 CONFIRMED", "🚀 BREAKOUT"]:
@@ -327,7 +324,7 @@ with tab1:
                             <div style='border: 2px solid {border_color}; border-radius: 8px; padding: 15px; background-color: {bg_color}; color: #333;'>
                                 <h4 style='margin-top:0px; color: #111;'>{custom_sym} System Diagnostics</h4>
                                 <b>Phase 1 Technical:</b> {c_status} &nbsp;|&nbsp; <b>LTP:</b> ₹{c_curr_price:.2f} &nbsp;|&nbsp; <b>Target:</b> ₹{c_trigger:.2f}<br>
-                                <b>V2 Champion:</b> {v2_confidence:.2f}% | <b>V3 Challenger:</b> {v3_confidence:.2f}%<br>
+                                <b>V3 AI Brain:</b> {v3_confidence:.2f}%<br>
                                 <hr style='margin: 8px 0; border-top: 1px solid #ccc;'>
                                 <small><b>RSI:</b> {c_rsi:.1f} &nbsp;|&nbsp; <b>Vol Surge:</b> {vol_surge:.0f}% &nbsp;|&nbsp; <b>Trap:</b> {c_trap_score} &nbsp;|&nbsp; <b>Reject:</b> {c_wick_reject}%</small>
                             </div>
@@ -438,7 +435,7 @@ with tab1:
                 # 🟢 1. GLOBAL AI EVALUATION (Runs for both shadow logging AND live buying)
                 final_approval = False
                 strategy_tag = "Legacy"
-                v2_confidence, v3_confidence = 0.0, 0.0
+                v3_confidence = 0.0
 
                 if raw_technical_trigger:
                     c_trap_score = round((c_rvol * c_wick_reject) / (1 + abs(c_sma20_dist)), 2)
@@ -451,13 +448,10 @@ with tab1:
                     }
                     macro_data_for_ai = {'VIX': c_vix, 'Nifty_Trend': n_trend, 'Nifty_5D': c_nifty_5d}
 
-                    v2_approved, v2_confidence = ask_ai_gatekeeper(ai_model, stock_data_for_ai, macro_data_for_ai)
                     v3_approved, v3_confidence = ask_v3_challenger(v3_model, stock_data_for_ai, macro_data_for_ai)
 
-                    final_approval = v2_approved or v3_approved
-                    if v2_approved and v3_approved: strategy_tag = "V2_V3_Agreement"
-                    elif v2_approved: strategy_tag = "V2_Only"
-                    elif v3_approved: strategy_tag = "V3_Only"
+                    final_approval = v3_approved
+                    strategy_tag = "V3_Only" if v3_approved else "Vetoed"
 
                 # 🟢 2. DECOUPLED SHADOW LOGGING (Only runs in afternoon, ignores bot_active)
                 if is_afternoon and raw_technical_trigger:
@@ -467,7 +461,7 @@ with tab1:
                         if symbol not in st.session_state.shadow_logged_today:
                             try:
                                 evaluate_and_log_shadow_trade(
-                                    ticker=symbol, entry_price=curr_price, traditional_score=max(v2_confidence, v3_confidence), 
+                                    ticker=symbol, entry_price=curr_price, traditional_score=v3_confidence, 
                                     live_vix=c_vix, nifty_intraday_pct=n_trend, is_market_halted=not is_safe_to_buy, 
                                     sheet_id=st.secrets["gcp_service_account"]["sheet_id"] 
                                 )
@@ -506,7 +500,7 @@ with tab1:
                                 "SMA20_Dist": c_sma20_dist, "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
                                 "Trap_Score": round((c_rvol * c_wick_reject) / (1 + abs(c_sma20_dist)), 2), 
                                 "Momentum_Velocity": round(c_rsi * c_rvol, 2), 
-                                "AI_Confidence": max(v2_confidence, v3_confidence),
+                                "AI_Confidence": v3_confidence,
                                 "Max_Profit_%": 0.0, "Max_Drawdown_%": 0.0
                             }
                             st.session_state.portfolio.append(new_trade)
@@ -515,10 +509,10 @@ with tab1:
                             st.toast(f"🤖 Bot Bought: {calculated_qty} shares of {symbol}")
                         else:
                             if symbol not in st.session_state.vetoed_today:
-                                st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - BOTH AI VETOED: {symbol}")
+                                st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - AI VETOED: {symbol}")
                                 vetoed_setup = {
                                     "Date": now.strftime("%Y-%m-%d"), "Time": now.strftime("%H:%M:%S"),
-                                    "Symbol": symbol, "Price": curr_price, "AI_Confidence": max(v2_confidence, v3_confidence),
+                                    "Symbol": symbol, "Price": curr_price, "AI_Confidence": v3_confidence,
                                     "VIX": c_vix, "Nifty_Trend": n_trend, "RVol": c_rvol,
                                     "RSI": c_rsi, "SMA200_Dist": c_dist, "SMA20_Dist": c_sma20_dist, 
                                     "Wick_Reject": c_wick_reject, "Nifty_5D": c_nifty_5d,
@@ -933,7 +927,7 @@ with tab3:
             st.markdown("**Filter by AI Brain**")
             strategy_filter = st.radio(
                 "Isolate Model Performance:", 
-                ["All AI Trades", "V3 Approved Only (V3_Only & Agreement)", "V2 Approved Only (V2_Only & Agreement)"],
+                ["All Trades (Including Legacy)", "V3 Approved Only"],
                 horizontal=True,
                 label_visibility="collapsed"
             )
@@ -942,8 +936,6 @@ with tab3:
             # Apply the mathematical filter
             if "V3" in strategy_filter:
                 df_j_score = df_j_score[df_j_score['Strategy'].astype(str).str.contains('V3', na=False)]
-            elif "V2" in strategy_filter:
-                df_j_score = df_j_score[df_j_score['Strategy'].astype(str).str.contains('V2', na=False)]
 
         shadow_mem = st.session_state.get('shadow_log_data', [])
         df_s_score = pd.DataFrame(shadow_mem) if shadow_mem else pd.DataFrame()
