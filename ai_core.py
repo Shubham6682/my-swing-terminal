@@ -26,7 +26,7 @@ def load_v3_brain():
         st.error(f"⚠️ V3 Brain Load Error: {e}")
         return None
 
-def ask_v3_challenger(v3_model, stock_data, macro_data, threshold=0.50):
+def ask_v3_challenger(v3_model, stock_data, macro_data, threshold=0.60):
     if v3_model is None: 
         return False, 0.0
     try:
