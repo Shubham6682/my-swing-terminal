@@ -51,7 +51,7 @@ def evaluate_and_log_shadow_trade(ticker, entry_price, traditional_score, live_v
         if logic["reject_if_vix_above_max"] and live_vix > macro["max_allowable_vix"]:
             agent_decision, agent_thesis = "REJECT", f"Macro Override: Live VIX ({live_vix}) exceeds allowable limit ({macro['max_allowable_vix']})."
         else:
-            if traditional_score >= 75.0: 
+            if traditional_score >= 60.0: 
                 agent_decision, agent_thesis = "APPROVE", "Approved: Traditional math strong and macro environment stable."
             else:
                 agent_decision, agent_thesis = "REJECT", "Rejected: Weak mathematical setup."
