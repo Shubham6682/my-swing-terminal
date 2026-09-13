@@ -188,15 +188,20 @@ def auto_grade_shadow_log(sheet_id):
                 
                 if t8_window.empty: continue
                 
-                max_high = float(t8_window['High'].max())
-                min_low = float(t8_window['Low'].min())
+                # 🟢 THE FIX: Chronological Evaluation Loop
                 last_close = float(t8_window['Close'].iloc[-1])
                 
                 outcome = "⏳ TBD"
-                
-                if max_high >= entry_price * 1.05: outcome = "1"
-                elif min_low <= entry_price * 0.97: outcome = "0"
-                elif days_passed >= 8: outcome = "1" if last_close > entry_price else "0"
+                for _, day_row in t8_window.iterrows():
+                    if float(day_row['Low']) <= entry_price * 0.97:
+                        outcome = "0"
+                        break
+                    if float(day_row['High']) >= entry_price * 1.05:
+                        outcome = "1"
+                        break
+
+                if outcome == "⏳ TBD" and days_passed >= 8:
+                    outcome = "1" if last_close > entry_price else "0"
                         
                 if outcome != "⏳ TBD":
                     row_number = index + 2 
