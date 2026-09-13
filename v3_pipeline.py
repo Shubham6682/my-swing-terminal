@@ -18,7 +18,7 @@ def build_v3_dataset():
     df_ghost = pd.read_csv(latest_ghost_file)
     
     # Clean the Ghost labels: Convert "1 (Winner)" into just the integer 1
-    df_ghost['Target_Label'] = df_ghost['V3_Truth_Label'].astype(str).str[0].astype(int)
+    df_ghost['Target_Label'] = df_ghost['Target_Label'].astype(str).str[0].astype(int)
     
     # Rename 'Date Vetoed' to 'Date' so it perfectly matches our Shadow CSV later
     df_ghost = df_ghost.rename(columns={'Date Vetoed': 'Date'})
