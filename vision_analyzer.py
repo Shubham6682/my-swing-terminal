@@ -81,7 +81,7 @@ def evaluate_and_log_vision_trade(ticker, df):
     current_price = float(df['Close'].iloc[-1])
     
     # Heuristic scoring engine for the initial data tracking phase
-    base_score = 50.0
+    base_score = 0.0
     if structure == "Higher_Lows (Bullish Base)": 
         base_score += 20
     if overhead_pct >= 5.0: 
