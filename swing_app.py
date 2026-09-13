@@ -749,7 +749,7 @@ with tab3:
                     df_shadow = df_shadow.dropna(subset=['Outcome_Num'])
                     
                     # Ensure Confidence is a series
-                    conf_col = df_shadow.get('AI_Confidence', df_shadow.get('Traditional_Score', pd.Series(0, index=df_shadow.index)))
+                    conf_col = df_shadow.get('Traditional_Conf_%', df_shadow.get('AI_Confidence', pd.Series(0, index=df_shadow.index)))
                     df_shadow['AI_Confidence'] = pd.to_numeric(conf_col, errors='coerce').fillna(0)
                     ticker_col = 'Ticker' if 'Ticker' in df_shadow.columns else 'Symbol'
                     df_shadow['Clean_Symbol'] = df_shadow[ticker_col].astype(str).str.replace('.NS', '', regex=False)
