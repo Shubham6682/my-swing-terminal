@@ -168,8 +168,12 @@ elif not closes.empty and '^NSEI' in closes.columns:
     if len(nifty_closes) > 20:
         last_data_date = nifty_closes.index[-1].tz_localize(None).strftime("%Y-%m-%d")
         if last_data_date != today_str:
-            market_status_msg = f"⚠️ API LAG: yfinance stuck on {last_data_date}. Waiting for live sync..."
-            is_safe_to_buy = False 
+            if now.weekday() >= 5: # 5 is Saturday, 6 is Sunday
+                market_status_msg = "🏖️ Chill! It's the weekend. The AI is sleeping, go enjoy your day off."
+                is_safe_to_buy = False
+            else:
+                market_status_msg = f"⚠️ API LAG: yfinance stuck on {last_data_date}. Waiting for live sync..."
+                is_safe_to_buy = False 
         else:
             nifty_sma20 = nifty_closes.rolling(20).mean().iloc[-1]
             nifty_curr = nifty_closes.iloc[-1]
