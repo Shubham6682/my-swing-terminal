@@ -201,6 +201,7 @@ with c1:
     elif "BULLISH" in market_status_msg: st.success(market_status_msg)
     elif "BEARISH" in market_status_msg: st.warning(market_status_msg)
     elif "PRE-MARKET" in market_status_msg: st.info(market_status_msg)
+    elif "Chill" in market_status_msg: st.success(market_status_msg) # 🟢 Renders the weekend message in green!
     else: st.warning(market_status_msg)
 
 with c2:
