@@ -80,16 +80,22 @@ def evaluate_and_log_vision_trade(ticker, df):
     structure, overhead_pct, chaos = extract_chart_topography(df)
     current_price = float(df['Close'].iloc[-1])
     
-    # Heuristic scoring engine for the initial data tracking phase
+   # A true 0-100 Heuristic Scoring Engine
     base_score = 0.0
+    
+    # 1. Market Structure is King (40% weight)
     if structure == "Higher_Lows (Bullish Base)": 
-        base_score += 20
-    if overhead_pct >= 5.0: 
-        base_score += 15
-    if chaos < 1.6: 
-        base_score += 10
+        base_score += 40.0
         
-    vision_confidence = min(base_score, 99.0)
+    # 2. Room to Run / Blue Sky (35% weight)
+    if overhead_pct >= 5.0: 
+        base_score += 35.0
+        
+    # 3. Tight Consolidation / Low Chaos (25% weight)
+    if chaos < 1.6: 
+        base_score += 25.0
+        
+    vision_confidence = min(base_score, 100.0)
     
     ist = pytz.timezone('Asia/Kolkata')
     timestamp = datetime.datetime.now(ist).strftime("%Y-%m-%d %H:%M:%S")
