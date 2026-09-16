@@ -210,25 +210,34 @@ def log_signal_cloud(symbol, signal_time, status, nifty_trend, vix, rvol, rsi, s
         print(f"Cloud Log Error: {e}")
     return False
 
-def load_signals_from_cloud():
-    history = {}
-    
-    import datetime
-    import pytz
-    local_ist = pytz.timezone('Asia/Kolkata')
-    real_today = datetime.datetime.now(local_ist).strftime("%Y-%m-%d")
+import datetime
+import pytz
 
+def load_signals_from_cloud():
+    """Fetches ONLY today's signals to populate the session state memory."""
     try:
-        data = fetch_sheet_data("Signal_Log")
-        if data:
-            df = pd.DataFrame(data)
-            if not df.empty and 'Date' in df.columns:
-                today_data = df[df['Date'] == real_today]
-                for _, row in today_data.iterrows():
-                    history[row['Symbol']] = str(row['Time']) # Force string just in case
-    except Exception as e: 
-        print(f"Error loading history: {e}")
-    return history
+        # (Keep your existing connection logic here, e.g., worksheet = ...)
+        worksheet = connect_to_sheet("Signal_Log") # Replace with your actual sheet connection code
+        data = worksheet.get_all_records()
+        
+        ist = pytz.timezone('Asia/Kolkata')
+        today_str = datetime.datetime.now(ist).strftime("%Y-%m-%d")
+        
+        history = {}
+        for row in data:
+            # Safely grab the date (handles different column naming formats)
+            raw_date = str(row.get('Date', row.get('Date_Time', ''))).split(' ')[0]
+            
+            # ONLY memorize it if it was logged today
+            if raw_date == today_str:
+                symbol = str(row.get('Symbol', row.get('Ticker', '')))
+                time_val = str(row.get('Time', row.get('Signal Time', row.get('EntryTime', '10:00'))))
+                history[symbol] = time_val
+                
+        return history
+    except Exception as e:
+        print(f"Error loading signals: {e}")
+        return {}
 
 # 🟢 NEW: V3 Pipeline Data Sync
 def sync_ghost_labels_to_cloud(df_vetoes):
