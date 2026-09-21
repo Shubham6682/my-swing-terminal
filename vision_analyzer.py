@@ -76,11 +76,18 @@ def extract_chart_topography(df, window=5):
 
 def evaluate_and_log_vision_trade(ticker, df):
     """Calculates chart health metrics and pushes them cleanly to the cloud sheet."""
+    ist = pytz.timezone('Asia/Kolkata')
+    
+    # 🟢 HARD BLOCK: Prevent weekend logging (5 = Saturday, 6 = Sunday)
+    if datetime.datetime.now(ist).weekday() >= 5:
+        print(f"[VISION SKIP] Weekend detected. Skipping log for {ticker}.")
+        return 0.0
+
     # Removed the internal try/except so swing_app.py can catch and display errors
     structure, overhead_pct, chaos = extract_chart_topography(df)
     current_price = float(df['Close'].iloc[-1])
     
-   # A true 0-100 Heuristic Scoring Engine
+    # A true 0-100 Heuristic Scoring Engine
     base_score = 0.0
     
     # 1. Market Structure is King (40% weight)
@@ -97,7 +104,7 @@ def evaluate_and_log_vision_trade(ticker, df):
         
     vision_confidence = min(base_score, 100.0)
     
-    ist = pytz.timezone('Asia/Kolkata')
+    # Timezone already declared at the top, just format the timestamp
     timestamp = datetime.datetime.now(ist).strftime("%Y-%m-%d %H:%M:%S")
     
     row_data = [
@@ -111,3 +118,5 @@ def evaluate_and_log_vision_trade(ticker, df):
     # 🟢 THE FIX: 'USER_ENTERED' performs a Blind Append (a pure Write request) without checking formatting.
     worksheet.append_row(row_data, value_input_option='USER_ENTERED')
     print(f"[VISION LAB SUCCESS] Chart metrics archived for {ticker}")
+    
+    return vision_confidence
