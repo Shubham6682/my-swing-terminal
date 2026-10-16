@@ -434,13 +434,7 @@ with tab1:
                     "Vol vs Avg": f"{(curr_vol/vol_sma20)*100:.0f}%" if vol_sma20 > 0 else "0%",
                     "Gap %": f"{gap_pct:.1f}%"
                 })
-                
-                scan_results.append({
-                    "Stock": symbol, "Status": status, "Signal Time": signal_time,
-                    "Price": round(curr_price, 2), "Entry": round(trigger_price, 2),
-                    "Vol vs Avg": f"{(curr_vol/vol_sma20)*100:.0f}%" if vol_sma20 > 0 else "0%",
-                    "Gap %": f"{gap_pct:.1f}%"
-                })
+    
                 
                 # 🟢 TIME WINDOWS:
                 # 1. Shadow logs run all day (9:15 AM - 3:30 PM) as soon as Phase 1 triggers
