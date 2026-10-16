@@ -435,9 +435,20 @@ with tab1:
                     "Gap %": f"{gap_pct:.1f}%"
                 })
                 
-                is_afternoon = datetime.time(9, 15) <= now.time() < datetime.time(15, 30)
+                scan_results.append({
+                    "Stock": symbol, "Status": status, "Signal Time": signal_time,
+                    "Price": round(curr_price, 2), "Entry": round(trigger_price, 2),
+                    "Vol vs Avg": f"{(curr_vol/vol_sma20)*100:.0f}%" if vol_sma20 > 0 else "0%",
+                    "Gap %": f"{gap_pct:.1f}%"
+                })
+                
+                # 🟢 TIME WINDOWS:
+                # 1. Shadow logs run all day (9:15 AM - 3:30 PM) as soon as Phase 1 triggers
+                is_market_hours = datetime.time(9, 15) <= now.time() < datetime.time(15, 30)
+                # 2. Live Buying & AI_Veto_Log ONLY trigger from 1:30 PM onwards on confirmed setups
+                is_execution_window = datetime.time(13, 30) <= now.time() < datetime.time(15, 30)
 
-                # 🟢 1. GLOBAL AI EVALUATION (Runs for both shadow logging AND live buying)
+                # 🟢 1. GLOBAL AI EVALUATION (Re-evaluates live metrics on every scan)
                 final_approval = False
                 strategy_tag = "Legacy"
                 v3_confidence = 0.0
@@ -458,8 +469,8 @@ with tab1:
                     final_approval = v3_approved
                     strategy_tag = "V3_Only" if v3_approved else "Vetoed"
 
-                # 🟢 2. DECOUPLED SHADOW LOGGING (Only runs in afternoon, ignores bot_active)
-                if is_afternoon and raw_technical_trigger:
+                # 🟢 2. DECOUPLED SHADOW LOGGING (Runs 9:15 AM - 3:30 PM, logs Phase 1 survivors once per day)
+                if is_market_hours and raw_technical_trigger:
                     if symbol not in [x['Symbol'] for x in st.session_state.portfolio] and symbol not in st.session_state.blacklist:
                         
                         # Agentic Interceptor
@@ -484,8 +495,8 @@ with tab1:
                                     time.sleep(1.5)
                             except Exception as e: print(f"Vision error: {e}")
 
-                # 🟢 3. REAL PORTFOLIO TRADER (Runs ALL day, strictly requires bot_active)
-                if bot_active and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
+                # 🟢 3. REAL PORTFOLIO TRADER & VETO LOGGER (Strictly locked until 1:30 PM IST)
+                if bot_active and is_execution_window and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
                     current_holdings = [x['Symbol'] for x in st.session_state.portfolio]
                     
                     if symbol not in current_holdings and symbol not in st.session_state.blacklist:
