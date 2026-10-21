@@ -13,7 +13,7 @@ now = datetime.datetime.now(ist)
 today_str = now.strftime("%Y-%m-%d")
 
 @st.cache_resource
-def init_google_sheet():
+def init_google_sheet(ttl=3000):
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
         
@@ -216,8 +216,10 @@ import pytz
 def load_signals_from_cloud():
     """Fetches ONLY today's signals to populate the session state memory."""
     try:
-        # (Keep your existing connection logic here, e.g., worksheet = ...)
-        worksheet = connect_to_sheet("Signal_Log") # Replace with your actual sheet connection code
+        client = init_google_sheet()
+        if not client:
+            return {}
+        worksheet = client.open("Swing_Trading_DB").worksheet("Signal_Log")
         data = worksheet.get_all_records()
         
         ist = pytz.timezone('Asia/Kolkata')
