@@ -55,10 +55,13 @@ if 'vision_logged_today' not in st.session_state: st.session_state.vision_logged
 if 'last_run_date' not in st.session_state or st.session_state.last_run_date != today_str:
     st.session_state.last_run_date = today_str
     st.session_state.signal_history = load_signals_from_cloud()
-    st.session_state.blacklist = []
     st.session_state.notifications = []
-    st.session_state.vetoed_today = []
-    st.session_state.vision_logged_today = [] # 🟢 NEW VISION RESET
+    
+    # Seed blacklist from today's closed Journal trades so afternoon refreshes don't re-buy sold stocks
+    st.session_state.blacklist = [
+        str(j.get('Symbol', '')) for j in st.session_state.journal
+        if str(j.get('ExitDate', '')) == today_str
+    ]
     
     # 🟢 SEED THE MEMORY BANK FROM GOOGLE SHEETS
     if st.session_state.db_connected:
@@ -70,14 +73,23 @@ if 'last_run_date' not in st.session_state or st.session_state.last_run_date != 
             # 🟢 FIX 2: Clone the Agentic cloud memory to the Vision AI so it survives page reloads!
             st.session_state.vision_logged_today = list(st.session_state.shadow_logged_today)
             
-            # 2. Run the morning grader
+            # 2. Seed today's AI Vetoes so page reloads after 1:30 PM don't re-trigger veto toasts
+            veto_rows = fetch_sheet_data("AI_Veto_Log")
+            st.session_state.vetoed_today = [
+                str(r.get('Symbol', '')) for r in veto_rows
+                if str(r.get('Date', '')).startswith(today_str)
+            ]
+            
+            # 3. Run the morning grader
             auto_grade_shadow_log(sheet_id)
         except Exception as e:
             st.session_state.shadow_logged_today = []
-            st.session_state.vision_logged_today = [] # 🟢 Keep synced on error
+            st.session_state.vision_logged_today = []
+            st.session_state.vetoed_today = []
     else:
         st.session_state.shadow_logged_today = []
-        st.session_state.vision_logged_today = [] # 🟢 Keep synced offline
+        st.session_state.vision_logged_today = []
+        st.session_state.vetoed_today = []
 
 # --- 4. SIDEBAR & NOTIFICATIONS ---
 with st.sidebar:
@@ -755,7 +767,7 @@ with tab3:
                     df_shadow = df_shadow.dropna(subset=['Outcome_Num'])
                     
                     # Ensure Confidence is a series
-                    conf_col = df_shadow.get('Traditional_Conf_%', df_shadow.get('AI_Confidence', pd.Series(0, index=df_shadow.index)))
+                    conf_col = df_shadow.get('Traditional_Conf_%', df_shadow.get('Traditional_Score', df_shadow.get('AI_Confidence', pd.Series(0, index=df_shadow.index))))
                     df_shadow['AI_Confidence'] = pd.to_numeric(conf_col, errors='coerce').fillna(0)
                     ticker_col = 'Ticker' if 'Ticker' in df_shadow.columns else 'Symbol'
                     df_shadow['Clean_Symbol'] = df_shadow[ticker_col].astype(str).str.replace('.NS', '', regex=False)
@@ -902,6 +914,9 @@ with tab3:
                     st.metric("Avg Peak Profit on Winning Trades", f"+{avg_mfe_wins:.2f}%")
                 else:
                     st.caption("MFE tracking active. Awaiting new closed trades.")
+            
+            st.divider()
+            run_advanced_audit(df_j)
         else:
             st.info("Journal is empty. No live trades completed yet.")
 
@@ -1027,7 +1042,7 @@ with tab3:
             df_s_score = df_s_score[~df_s_score['T8_Final_Outcome'].astype(str).str.contains("TBD")]
             df_s_score['Outcome_Num'] = pd.to_numeric(df_s_score['T8_Final_Outcome'], errors='coerce')
             df_s_score = df_s_score.dropna(subset=['Outcome_Num'])
-            conf_col = df_s_score.get('AI_Confidence', df_s_score.get('Traditional_Score', pd.Series(0, index=df_s_score.index)))
+            conf_col = df_s_score.get('Traditional_Conf_%', df_s_score.get('Traditional_Score', df_s_score.get('AI_Confidence', pd.Series(0, index=df_s_score.index))))
             df_s_score['AI_Confidence'] = pd.to_numeric(conf_col, errors='coerce').fillna(0)
 
             bins = [0, 50, 55, 60, 65, 70, 100]
