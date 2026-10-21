@@ -70,7 +70,11 @@ def render_ghost_portfolio():
                 stock_series = live_data[ticker].dropna() if ticker in live_data.columns else pd.Series()
             
             if not stock_series.empty:
-                post_veto_data = stock_series[stock_series.index.tz_localize(None) >= row['Date']]
+                expiration_date = row['Date'] + datetime.timedelta(days=max_days)
+                post_veto_data = stock_series[
+                    (stock_series.index.tz_localize(None).normalize() > row['Date'].normalize()) &
+                    (stock_series.index.tz_localize(None) <= expiration_date)
+                ]
                 
                 if not post_veto_data.empty:
                     current_price = float(post_veto_data.iloc[-1])
@@ -105,7 +109,6 @@ def render_ghost_portfolio():
                             
                         # Condition 2: Trailing Stop Logic (Activated at target_pct)
                         elif peak_pct >= trail_activation_pct:
-                            # The stop trails behind the highest peak by the SL percentage
                             trailing_sl_price = highest_seen * (1 - (abs(stop_pct)/100))
                             current_active_sl = trailing_sl_price
                             
@@ -118,11 +121,17 @@ def render_ghost_portfolio():
 
                     # 🟢 Reality Check 2: Expiration Logic (Time Decay)
                     if trade_active:
+                        peak_pct = ((highest_seen - entry_price) / entry_price) * 100
                         if days_elapsed >= max_days:
                             final_exit_price = current_price
-                            status = "🛡️ Dodged Bullet (Time Decay)"
-                            truth_label = "0 (Loser)"
-                            dodged_bullets += 1
+                            if peak_pct >= trail_activation_pct or final_exit_price > entry_price:
+                                status = "🚨 Missed Winner (Time Exit)"
+                                truth_label = "1 (Winner)"
+                                missed_winners += 1
+                            else:
+                                status = "🛡️ Dodged Bullet (Time Decay)"
+                                truth_label = "0 (Loser)"
+                                dodged_bullets += 1
                         else:
                             in_progress += 1
 
