@@ -11,6 +11,7 @@ def load_agent_rules(filepath="agent_rules.json"):
     with open(filepath, "r") as file:
         return json.load(file)
 
+@st.cache_resource(ttl=3000)
 def connect_to_shadow_log(sheet_id):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     credentials_dict = dict(st.secrets["gcp_service_account"])
