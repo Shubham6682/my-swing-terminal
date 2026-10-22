@@ -169,7 +169,7 @@ market_status_msg = "⚪ MARKET DATA LOADING..."
 if use_manual_nifty:
     intraday_pct = float(manual_intraday)
     nifty_5d_trend = float(manual_5d)
-    is_bleeding = intraday_pct < -0.3
+    is_bleeding = intraday_pct < -0.5
     is_macro_bullish = True 
     is_safe_to_buy = not is_bleeding
     if is_bleeding: market_status_msg = f"🔴 MANUAL OVERRIDE: Nifty Bleeding ({intraday_pct:.2f}%) - Buying Halted"
@@ -195,7 +195,7 @@ elif not closes.empty and '^NSEI' in closes.columns:
                 nifty_5d_trend = ((nifty_curr - nifty_5d_prev) / nifty_5d_prev) * 100
             intraday_pct = ((nifty_curr - nifty_prev) / nifty_prev) * 100
             is_macro_bullish = nifty_curr > nifty_sma20
-            is_bleeding = intraday_pct < -0.3
+            is_bleeding = intraday_pct < -0.5
             is_safe_to_buy = is_macro_bullish and not is_bleeding
             if is_bleeding: market_status_msg = f"🔴 CRITICAL: NIFTY BLEEDING ({intraday_pct:.2f}%). ALL BUYING HALTED."
             elif not is_macro_bullish: market_status_msg = f"🔴 MARKET MOOD: BEARISH (Below 20 SMA). Buying Paused."
