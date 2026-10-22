@@ -47,13 +47,14 @@ def evaluate_and_log_shadow_trade(ticker, entry_price, traditional_score, live_v
 
     if is_market_halted or nifty_intraday_pct <= macro["nifty_bleed_threshold_percent"]:
         is_phantom = True
+        halt_reason = "intraday bleed" if nifty_intraday_pct <= macro["nifty_bleed_threshold_percent"] else "Nifty below 20-SMA"
         if macro["phantom_trade_exploration_enabled"]:
             if traditional_score >= logic["min_traditional_score_for_phantom_buy"]:
-                agent_decision, agent_thesis = "APPROVE", f"Phantom Trade: High conviction capitulation setup ({traditional_score}% score)."
+                agent_decision, agent_thesis = "APPROVE", f"Phantom Trade: High conviction setup ({traditional_score}%) despite {halt_reason}."
             else:
-                agent_decision, agent_thesis = "REJECT", f"Phantom Reject: Score ({traditional_score}%) too low during market bleed."
+                agent_decision, agent_thesis = "REJECT", f"Phantom Reject: Score ({traditional_score}%) < {logic['min_traditional_score_for_phantom_buy']}% required during {halt_reason}."
         else:
-            agent_decision, agent_thesis = "REJECT", "System Halted: Phantom exploration disabled."
+            agent_decision, agent_thesis = "REJECT", f"System Halted ({halt_reason}): Phantom exploration disabled."
     else:
         if logic["reject_if_vix_above_max"] and live_vix > macro["max_allowable_vix"]:
             agent_decision, agent_thesis = "REJECT", f"Macro Override: Live VIX ({live_vix}) exceeds allowable limit ({macro['max_allowable_vix']})."
