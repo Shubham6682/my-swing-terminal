@@ -1,9 +1,9 @@
 {
   "system_status": "active",
-  "last_updated": "2026-06-12",
+  "last_updated": "2026-10-22",
   "macro_boundaries": {
     "max_allowable_vix": 18.0,
-    "nifty_bleed_threshold_percent": -1.0,
+    "nifty_bleed_threshold_percent": -0.5,
     "phantom_trade_exploration_enabled": true
   },
   "override_logic": {
