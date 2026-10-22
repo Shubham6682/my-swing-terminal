@@ -772,20 +772,9 @@ with tab3:
                     ticker_col = 'Ticker' if 'Ticker' in df_shadow.columns else 'Symbol'
                     df_shadow['Clean_Symbol'] = df_shadow[ticker_col].astype(str).str.replace('.NS', '', regex=False)
 
-                    # Universe Splitter Toggle
-                    universe_filter = st.radio(
-                        "Select Market Universe to Audit:", 
-                        ["Nifty 50 (Streamlit Live)", "Nifty 500 (GitHub Background)"],
-                        horizontal=True
-                    )
-                    
-                    # Filter dataset based on EXACT string selection
-                    if universe_filter == "Nifty 50 (Streamlit Live)":
-                        df_target = df_shadow[df_shadow['Clean_Symbol'].isin(NIFTY_50)]
-                        display_title = "Nifty 50 (Large Cap)"
-                    else:
-                        df_target = df_shadow[~df_shadow['Clean_Symbol'].isin(NIFTY_50)]
-                        display_title = "Nifty 500 (Broader Market)"
+                    # Strictly isolate Nifty 50 setups (ignores any legacy Nifty 500 rows in the sheet)
+                    df_target = df_shadow[df_shadow['Clean_Symbol'].isin(NIFTY_50)].copy()
+                    display_title = "Nifty 50 (Large Cap)"
                     
                     if not df_target.empty:
                         wins = df_target[df_target['Outcome_Num'] == 1]
@@ -827,7 +816,7 @@ with tab3:
                         else:
                             st.caption("No data available in confidence tiers yet.")
                     else:
-                        st.info(f"No completed T+8 trades found for {universe_filter}.")
+                        st.info("No completed T+8 trades found for Nifty 50.")
                 else:
                     st.info("Shadow log has no completed trades yet. All are pending.")
             else:
