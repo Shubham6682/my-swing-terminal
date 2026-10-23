@@ -408,7 +408,15 @@ with tab1:
                 try: c_vix = round(float(closes['^INDIAVIX'].dropna().iloc[-1]), 2)
                 except: c_vix = 15.0
                 
-                c_rvol = round(float(curr_vol / vol_sma20), 2) if vol_sma20 > 0 else 1.0
+                # 🟢 NEW: Time-Normalized Intraday Volume (RVol) Fixes the Morning Bias
+                if is_market_active:
+                    elapsed_mins = (now.hour * 60 + now.minute) - (9 * 60 + 15)
+                    day_fraction = max(1, min(elapsed_mins, 375)) / 375.0
+                else:
+                    day_fraction = 1.0 # Uses full day volume if market is closed
+                    
+                expected_vol = vol_sma20 * day_fraction
+                c_rvol = round(float(curr_vol / expected_vol), 2) if expected_vol > 0 else 1.0
                 c_rsi = round(float(calculate_rsi(series).iloc[-1]), 2)
                 c_sma200 = series.rolling(200).mean().iloc[-1]
                 c_dist = round(float(((curr_price - c_sma200) / c_sma200) * 100), 2) if c_sma200 > 0 else 0.0
@@ -484,8 +492,10 @@ with tab1:
                             try:
                                 evaluate_and_log_shadow_trade(
                                     ticker=symbol, entry_price=curr_price, traditional_score=v3_confidence, 
-                                    live_vix=c_vix, nifty_intraday_pct=n_trend, is_market_halted=not is_safe_to_buy, 
-                                    sheet_id=st.secrets["gcp_service_account"]["sheet_id"] 
+                                    live_vix=c_vix, nifty_intraday_pct=n_trend, is_market_halted=not is_safe_to_buy,
+                                    rvol=c_rvol, rsi=c_rsi, sma200_dist=c_dist, sma20_dist=c_sma20_dist,
+                                    wick_reject=c_wick_reject, nifty_5d=c_nifty_5d, trap_score=c_trap_score,
+                                    momentum_velocity=c_mom_vel, sheet_id=st.secrets["gcp_service_account"]["sheet_id"] 
                                 )
                                 st.session_state.shadow_logged_today.append(symbol)
                                 time.sleep(2) 
@@ -658,18 +668,28 @@ with tab2:
                 if trade['Symbol'] not in st.session_state.blacklist:
                     st.session_state.blacklist.append(trade['Symbol'])
             
-            # 🟢 AUTO-SELL BLOCK: The AI is allowed to learn from these
-            elif auto_sell and not api_glitch and (price <= new_sl):
+            # 🟢 NEW: 8-Day Live Time Decay Check
+            try:
+                buy_date = datetime.datetime.strptime(str(trade.get('Date', today_str)), "%Y-%m-%d").date()
+                days_held = (now.date() - buy_date).days
+            except:
+                days_held = 0
+            time_exit_triggered = days_held >= 8
+            
+            # 🟢 AUTO-SELL BLOCK: Protected by Market Hours + Time Decay Enforced
+            elif auto_sell and is_market_active and not api_glitch and (price <= new_sl or time_exit_triggered):
+                exit_reason = "Time Decay" if time_exit_triggered and price > new_sl else "Stop/Trail Hit"
+                
                 closed_trade = trade.copy()
                 closed_trade.update({
                     'ExitPrice': price, 'ExitDate': now.strftime("%Y-%m-%d"), 
                     'ExitTime': now.strftime("%H:%M:%S"), 'PnL': pnl, 
-                    'Target_Label': "1 (Winner)" if pnl > 0 else "0 (Loser)", # <--- UNIFIED HERE
+                    'Target_Label': "1 (Winner)" if pnl > 0 else "0 (Loser)", 
                     'Max_Profit_%': trade.get('Max_Profit_%', 0.0),
                     'Max_Drawdown_%': trade.get('Max_Drawdown_%', 0.0)
                 })
                 if log_trade_journal(closed_trade):
-                    st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - AUTO-SOLD: {trade['Symbol']} at ₹{price:.2f}")
+                    st.session_state.notifications.append(f"🛑 {now.strftime('%H:%M')} - AUTO-SOLD ({exit_reason}): {trade['Symbol']} at ₹{price:.2f}")
                     st.session_state.journal.append(closed_trade)
                     st.session_state.blacklist.append(trade['Symbol'])
                     portfolio_changed = True
