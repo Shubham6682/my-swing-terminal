@@ -485,31 +485,30 @@ with tab1:
 
                 # 🟢 2. DECOUPLED SHADOW LOGGING (Runs 9:15 AM - 3:30 PM, logs Phase 1 survivors once per day)
                 if is_market_hours and raw_technical_trigger:
-                    if symbol not in [x['Symbol'] for x in st.session_state.portfolio] and symbol not in st.session_state.blacklist:
-                        
-                        # Agentic Interceptor
-                        if symbol not in st.session_state.shadow_logged_today:
-                            try:
-                                evaluate_and_log_shadow_trade(
-                                    ticker=symbol, entry_price=curr_price, traditional_score=v3_confidence, 
-                                    live_vix=c_vix, nifty_intraday_pct=n_trend, is_market_halted=not is_safe_to_buy,
-                                    rvol=c_rvol, rsi=c_rsi, sma200_dist=c_dist, sma20_dist=c_sma20_dist,
-                                    wick_reject=c_wick_reject, nifty_5d=c_nifty_5d, trap_score=c_trap_score,
-                                    momentum_velocity=c_mom_vel, sheet_id=st.secrets["gcp_service_account"]["sheet_id"] 
-                                )
-                                st.session_state.shadow_logged_today.append(symbol)
-                                time.sleep(2) 
-                            except Exception as e: print(f"Shadow error: {e}")
+                    
+                    # Agentic Interceptor
+                    if symbol not in st.session_state.shadow_logged_today:
+                        try:
+                            evaluate_and_log_shadow_trade(
+                                ticker=symbol, entry_price=curr_price, traditional_score=v3_confidence, 
+                                live_vix=c_vix, nifty_intraday_pct=n_trend, is_market_halted=not is_safe_to_buy,
+                                rvol=c_rvol, rsi=c_rsi, sma200_dist=c_dist, sma20_dist=c_sma20_dist,
+                                wick_reject=c_wick_reject, nifty_5d=c_nifty_5d, trap_score=c_trap_score,
+                                momentum_velocity=c_mom_vel, sheet_id=st.secrets["gcp_service_account"]["sheet_id"] 
+                            )
+                            st.session_state.shadow_logged_today.append(symbol)
+                            time.sleep(2) 
+                        except Exception as e: print(f"Shadow error: {e}")
 
-                        # Vision AI Logger
-                        if symbol not in st.session_state.vision_logged_today:
-                            try:
-                                ticker_df = pd.DataFrame({'Close': closes[ticker], 'High': highs[ticker]}).dropna().tail(125) 
-                                if not ticker_df.empty:
-                                    evaluate_and_log_vision_trade(symbol, ticker_df)
-                                    st.session_state.vision_logged_today.append(symbol)
-                                    time.sleep(1.5)
-                            except Exception as e: print(f"Vision error: {e}")
+                    # Vision AI Logger
+                    if symbol not in st.session_state.vision_logged_today:
+                        try:
+                            ticker_df = pd.DataFrame({'Close': closes[ticker], 'High': highs[ticker]}).dropna().tail(125) 
+                            if not ticker_df.empty:
+                                evaluate_and_log_vision_trade(symbol, ticker_df)
+                                st.session_state.vision_logged_today.append(symbol)
+                                time.sleep(1.5)
+                        except Exception as e: print(f"Vision error: {e}")
 
                 # 🟢 3. REAL PORTFOLIO TRADER & VETO LOGGER (Strictly locked until 1:30 PM IST)
                 if bot_active and is_execution_window and status in ["🎯 CONFIRMED", "🚀 BREAKOUT", "✅ STRONG BUY"]:
