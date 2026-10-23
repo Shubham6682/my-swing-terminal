@@ -189,7 +189,7 @@ def render_ghost_portfolio():
         if not completed_trades.empty:
             st.divider()
             st.markdown("### 💾 V3 Training Pipeline")
-            st.caption(f"✅ The AI has {len(completed_trades)} definitive labels ready for V3 training. (Cloud Sync managed by GitHub Actions)")
+            st.caption(f"✅ The AI has {len(completed_trades)} definitive labels ready for V3 training. (Cloud Sync managed by Morning Startup)")
             
             # Safe, read-only CSV download
             csv = completed_trades.to_csv(index=False).encode('utf-8')
