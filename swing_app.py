@@ -657,6 +657,15 @@ with tab2:
                     portfolio_changed = True
             
             action_taken = False
+            
+            # 🟢 NEW: 8-Day Live Time Decay Check (Calculated before the if-statement)
+            try:
+                buy_date = datetime.datetime.strptime(str(trade.get('Date', today_str)), "%Y-%m-%d").date()
+                days_held = (now.date() - buy_date).days
+            except:
+                days_held = 0
+            time_exit_triggered = days_held >= 8
+
             is_already_sold = any(
                 j.get('Symbol') == trade['Symbol'] and str(j.get('ExitDate')) == now.strftime("%Y-%m-%d") 
                 for j in st.session_state.journal
@@ -667,14 +676,6 @@ with tab2:
                 action_taken = True
                 if trade['Symbol'] not in st.session_state.blacklist:
                     st.session_state.blacklist.append(trade['Symbol'])
-            
-            # 🟢 NEW: 8-Day Live Time Decay Check
-            try:
-                buy_date = datetime.datetime.strptime(str(trade.get('Date', today_str)), "%Y-%m-%d").date()
-                days_held = (now.date() - buy_date).days
-            except:
-                days_held = 0
-            time_exit_triggered = days_held >= 8
             
             # 🟢 AUTO-SELL BLOCK: Protected by Market Hours + Time Decay Enforced
             elif auto_sell and is_market_active and not api_glitch and (price <= new_sl or time_exit_triggered):
