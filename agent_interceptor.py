@@ -32,7 +32,7 @@ def fetch_todays_shadow_log(sheet_id):
         print(f"[AGENT MEMORY ERROR] Failed to fetch memory: {e}")
         return []
 
-def evaluate_and_log_shadow_trade(ticker, entry_price, traditional_score, live_vix, nifty_intraday_pct, is_market_halted, sheet_id):
+def evaluate_and_log_shadow_trade(ticker, entry_price, traditional_score, live_vix, nifty_intraday_pct, is_market_halted, rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, trap_score, momentum_velocity, sheet_id):
     ist = pytz.timezone('Asia/Kolkata')
     
     # 🟢 HARD BLOCK: Prevent weekend logging (5 = Saturday, 6 = Sunday)
@@ -68,6 +68,7 @@ def evaluate_and_log_shadow_trade(ticker, entry_price, traditional_score, live_v
     timestamp = datetime.datetime.now(ist).strftime("%Y-%m-%d %H:%M:%S")
     row_data = [
         timestamp, ticker, traditional_score, live_vix, nifty_intraday_pct, 
+        rvol, rsi, sma200_dist, sma20_dist, wick_reject, nifty_5d, trap_score, momentum_velocity,
         str(is_phantom), agent_decision, agent_thesis, entry_price, "⏳ TBD"
     ]
 
