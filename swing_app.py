@@ -15,6 +15,7 @@ from indicators import calculate_rsi, calculate_bollinger_width
 from database import init_google_sheet, fetch_sheet_data, save_portfolio_cloud, log_trade_journal, log_ai_veto, log_signal_cloud, load_signals_from_cloud, sync_ghost_labels_to_cloud
 from agent_interceptor import evaluate_and_log_shadow_trade, auto_grade_shadow_log, fetch_todays_shadow_log
 from vision_analyzer import evaluate_and_log_vision_trade
+from auto_ghost_labeler import run_automated_labeling
 
 # --- 1. SYSTEM CONFIGURATION (MUST BE FIRST) ---
 st.set_page_config(page_title="Elite Quant Terminal", layout="wide")
@@ -80,8 +81,9 @@ if 'last_run_date' not in st.session_state or st.session_state.last_run_date != 
                 if str(r.get('Date', '')).startswith(today_str)
             ]
             
-            # 3. Run the morning grader
+            # 3. Run the morning graders
             auto_grade_shadow_log(sheet_id)
+            run_automated_labeling()
         except Exception as e:
             st.session_state.shadow_logged_today = []
             st.session_state.vision_logged_today = []
