@@ -197,20 +197,56 @@ def auto_grade_shadow_log(sheet_id):
                 
                 if t8_window.empty: continue
                 
-                # 🟢 THE FIX: Chronological Evaluation Loop
+                # 🟢 THE FIX: 3-5-3 Chronological Evaluation Loop (Matching Live & Veto Logic)
                 last_close = float(t8_window['Close'].iloc[-1])
-                
+                highest_seen = entry_price
+                trade_active = True
+                trailing_active = False
                 outcome = "⏳ TBD"
+                
                 for _, day_row in t8_window.iterrows():
-                    if float(day_row['Low']) <= entry_price * 0.97:
-                        outcome = "0"
+                    if not trade_active: break
+                    
+                    day_high = float(day_row['High'])
+                    day_low = float(day_row['Low'])
+                    day_close = float(day_row['Close'])
+                    
+                    live_low_pct = ((day_low - entry_price) / entry_price) * 100
+                    
+                    # 1. Hard Stop BEFORE Trailing Activation
+                    if not trailing_active and live_low_pct <= -3.0:
+                        outcome = "0 (Loser)"
+                        trade_active = False
                         break
-                    if float(day_row['High']) >= entry_price * 1.05:
-                        outcome = "1"
-                        break
+                    
+                    # 2. Check Trailing Stop (if already active)
+                    if trailing_active:
+                        if day_high > highest_seen:
+                            highest_seen = day_high
+                        trailing_sl = highest_seen * 0.97
+                        if day_low <= trailing_sl:
+                            outcome = "1 (Winner)"
+                            trade_active = False
+                            break
+                    else:
+                        # 3. Check for Trailing Activation (+5%)
+                        if day_high > highest_seen:
+                            highest_seen = day_high
+                        peak_pct = ((highest_seen - entry_price) / entry_price) * 100
+                        if peak_pct >= 5.0:
+                            trailing_active = True
+                            trailing_sl = highest_seen * 0.97
+                            if day_close <= trailing_sl:
+                                outcome = "1 (Winner)"
+                                trade_active = False
+                                break
 
-                if outcome == "⏳ TBD" and days_passed >= 8:
-                    outcome = "1" if last_close > entry_price else "0"
+                # 4. Time Decay (Day 8 Window Expiration)
+                if trade_active and days_passed >= 8:
+                    if trailing_active or last_close > entry_price:
+                        outcome = "1 (Winner)"
+                    else:
+                        outcome = "0 (Loser)"
                         
                 if outcome != "⏳ TBD":
                     row_number = index + 2 
