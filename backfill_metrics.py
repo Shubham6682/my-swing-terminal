@@ -20,9 +20,9 @@ def run_historical_backfill():
 
         df = pd.DataFrame(raw_data)
 
-        # Ensure columns exist safely
-        if 'Max_Profit_%' not in df.columns: df['Max_Profit_%'] = ""
-        if 'Max_Drawdown_%' not in df.columns: df['Max_Drawdown_%'] = ""
+        # Ensure columns exist safely (Initializing as numbers)
+        if 'Max_Profit_%' not in df.columns: df['Max_Profit_%'] = 0.0
+        if 'Max_Drawdown_%' not in df.columns: df['Max_Drawdown_%'] = 0.0
         if 'Target_Label' not in df.columns: df['Target_Label'] = ""
 
         # 2. Filter for finalized trades missing metrics (Robust String Cleaning)
@@ -33,6 +33,10 @@ def run_historical_backfill():
         mask_label = df['Clean_Label'].str.contains("1|0|Winner|Loser", case=False, regex=True)
         # Finds missing metrics (blank, zero, or NaN)
         mask_missing = df['Clean_Max'].isin(['0', '0.0', '', 'nan', 'none'])
+        
+        # 🟢 FIX: Force columns to float type to prevent Pandas string assignment crashes
+        df['Max_Profit_%'] = pd.to_numeric(df['Max_Profit_%'], errors='coerce').fillna(0.0)
+        df['Max_Drawdown_%'] = pd.to_numeric(df['Max_Drawdown_%'], errors='coerce').fillna(0.0)
         
         df_backfill = df[mask_label & mask_missing].copy()
 
