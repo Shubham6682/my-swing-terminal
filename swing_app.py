@@ -16,6 +16,7 @@ from database import init_google_sheet, fetch_sheet_data, save_portfolio_cloud, 
 from agent_interceptor import evaluate_and_log_shadow_trade, auto_grade_shadow_log, fetch_todays_shadow_log
 from vision_analyzer import evaluate_and_log_vision_trade
 from auto_ghost_labeler import run_automated_labeling
+from backfill_metrics import run_historical_backfill
 
 # --- 1. SYSTEM CONFIGURATION (MUST BE FIRST) ---
 st.set_page_config(page_title="Elite Quant Terminal", layout="wide")
@@ -141,6 +142,15 @@ with st.sidebar:
             else: 
                 st.session_state.db_connected = False
                 st.error("❌ Failed")
+        
+        st.divider()
+        if st.button("⏳ Run Legacy Backfill"):
+            with st.spinner("Simulating historical 8-day windows..."):
+                try:
+                    run_historical_backfill()
+                    st.success("✅ Database backfill complete! Legacy trades are now fully standardized.")
+                except Exception as e:
+                    st.error(f"❌ Backfill failed: {e}")
 
     st.divider()
     st.subheader("🛠️ Emergency API Override")
