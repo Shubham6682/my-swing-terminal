@@ -5,6 +5,8 @@ import numpy as np
 import datetime
 import pytz
 import time
+import threading
+from streamlit.runtime.scriptrunner import add_script_run_ctx
 from streamlit_autorefresh import st_autorefresh
 from analysis import run_advanced_audit
 from ghost_dashboard import render_ghost_portfolio  
@@ -85,17 +87,22 @@ if 'last_run_date' not in st.session_state or st.session_state.last_run_date != 
                 if str(r.get('Date', '')).startswith(today_str)
             ]
             
-            # 3. Run the morning graders
-            auto_grade_shadow_log(sheet_id)
-            run_automated_labeling()
+            # 3. Run the morning graders silently in a BACKGROUND THREAD
+            def run_background_graders():
+                try:
+                    auto_grade_shadow_log(sheet_id)
+                    run_automated_labeling()
+                except Exception as e:
+                    print(f"[BACKGROUND THREAD ERROR]: {e}")
+
+            grader_thread = threading.Thread(target=run_background_graders)
+            add_script_run_ctx(grader_thread) # Securely passes Streamlit's UI context to the thread
+            grader_thread.start()
+            
         except Exception as e:
             st.session_state.shadow_logged_today = []
             st.session_state.vision_logged_today = []
             st.session_state.vetoed_today = []
-    else:
-        st.session_state.shadow_logged_today = []
-        st.session_state.vision_logged_today = []
-        st.session_state.vetoed_today = []
 
 # --- 4. SIDEBAR & NOTIFICATIONS ---
 with st.sidebar:
