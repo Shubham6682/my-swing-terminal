@@ -21,6 +21,9 @@ from backfill_metrics import run_historical_backfill
 # --- 1. SYSTEM CONFIGURATION (MUST BE FIRST) ---
 st.set_page_config(page_title="Elite Quant Terminal", layout="wide")
 
+if 'special_session' not in st.session_state: 
+    st.session_state.special_session = False
+
 ist = pytz.timezone('Asia/Kolkata')
 now = datetime.datetime.now(ist)
 today_str = now.strftime("%Y-%m-%d")
@@ -30,7 +33,7 @@ v3_model = load_v3_brain()
 
 market_open = datetime.time(9, 15)
 market_close = datetime.time(15, 30)
-is_market_active = (now.weekday() < 5) and (market_open <= now.time() < market_close)
+is_market_active = ((now.weekday() < 5) and (market_open <= now.time() < market_close)) or st.session_state.get('special_session', False)
 
 if is_market_active:
     st_autorefresh(interval=300000, key="quant_v18_active_only")
@@ -154,6 +157,7 @@ with st.sidebar:
 
     st.divider()
     st.subheader("🛠️ Emergency API Override")
+    st.session_state.special_session = st.checkbox("🎇 Force Special Session (Muhurat)", value=st.session_state.get('special_session', False))
     use_manual_nifty = st.checkbox("Force Manual Nifty Data", help="Check this if yfinance is frozen or showing old dates.")
     manual_intraday = st.number_input("Enter Live Nifty % (e.g., -0.45)", value=0.00, step=0.05)
     manual_5d = st.number_input("Enter 5-Day Nifty % (e.g., -2.10)", value=0.00, step=0.05)
@@ -192,7 +196,7 @@ elif not closes.empty and '^NSEI' in closes.columns:
     if len(nifty_closes) > 20:
         last_data_date = nifty_closes.index[-1].tz_localize(None).strftime("%Y-%m-%d")
         if last_data_date != today_str:
-            if now.weekday() >= 5: # 5 is Saturday, 6 is Sunday
+            if now.weekday() >= 5 and not st.session_state.get('special_session', False): 
                 market_status_msg = "🏖️ Chill! It's the weekend. The AI is sleeping, go enjoy your day off."
                 is_safe_to_buy = False
             else:
@@ -468,11 +472,12 @@ with tab1:
                 })
     
                 
-                # 🟢 TIME WINDOWS:
+                # 🟢 TIME WINDOWS (UPGRADED WITH STRICT WEEKEND PROTECTION):
                 # 1. Shadow logs run all day (9:15 AM - 3:30 PM) as soon as Phase 1 triggers
-                is_market_hours = datetime.time(9, 15) <= now.time() < datetime.time(15, 30)
+                is_market_hours = ((now.weekday() < 5) and (datetime.time(9, 15) <= now.time() < datetime.time(15, 30))) or st.session_state.get('special_session', False)
+                
                 # 2. Live Buying & AI_Veto_Log ONLY trigger from 1:30 PM onwards on confirmed setups
-                is_execution_window = datetime.time(13, 30) <= now.time() < datetime.time(15, 30)
+                is_execution_window = ((now.weekday() < 5) and (datetime.time(13, 30) <= now.time() < datetime.time(15, 30))) or st.session_state.get('special_session', False)
 
                 # 🟢 1. GLOBAL AI EVALUATION (Re-evaluates live metrics on every scan)
                 final_approval = False
