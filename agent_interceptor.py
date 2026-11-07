@@ -142,7 +142,7 @@ def auto_grade_shadow_log(sheet_id):
             
             st.toast(f"🔄 {tab_name}: Analyzing {len(pending_rows)} pending trades...", icon="⏳")
             
-            live_data = yf.download(list(unique_tickers), period="3mo", threads=False, progress=False)
+            live_data = yf.download(list(unique_tickers), period="3mo", threads=True, progress=False)
             
             if live_data.empty: continue
 
